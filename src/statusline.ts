@@ -10,6 +10,23 @@ import { homedir } from 'os';
 
 const PLUGIN_DIR = process.env.BACKSTAGE_DIR || `${homedir()}/.claude/plugins/backstage`;
 const HISTORY_FILE = `${PLUGIN_DIR}/history.log`;
+const CONFIG_FILE = `${PLUGIN_DIR}/config.json`;
+
+// 설정 로드
+function loadConfig(): { displayLines: number; historyTimeout: number } {
+  try {
+    if (existsSync(CONFIG_FILE)) {
+      const config = JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'));
+      return {
+        displayLines: config.displayLines || 5,
+        historyTimeout: config.historyTimeout || 30000
+      };
+    }
+  } catch {}
+  return { displayLines: 5, historyTimeout: 30000 };
+}
+
+const config = loadConfig();
 
 // 색상 코드
 const RESET = '\x1b[0m';
@@ -42,7 +59,7 @@ function runClaudeHud(stdin: string): string {
 }
 
 // 최근 오피스 대화 읽기
-function getRecentLines(count: number = 4): string[] {
+function getRecentLines(count: number = config.displayLines): string[] {
   if (!existsSync(HISTORY_FILE)) {
     return [];
   }
@@ -52,8 +69,8 @@ function getRecentLines(count: number = 4): string[] {
     const now = Date.now();
     const fileAge = now - stat.mtimeMs;
 
-    // 30초 이상 지난 로그는 표시 안 함
-    if (fileAge > 30000) {
+    // 설정된 시간 이상 지난 로그는 표시 안 함
+    if (fileAge > config.historyTimeout) {
       return [];
     }
 
@@ -107,7 +124,7 @@ async function main() {
   }
 
   // 오피스 대화 표시
-  const recentLines = getRecentLines(3);
+  const recentLines = getRecentLines();
   if (recentLines.length > 0) {
     console.log(`${DIM}${'─'.repeat(40)}${RESET}`);
     console.log(`${MAGENTA}${BOLD}Backstage${RESET}`);

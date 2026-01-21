@@ -1,0 +1,9 @@
+{
+  "skills": [
+    {
+      "name": "configure",
+      "description": "Configure Backstage display settings (lines, timeout)",
+      "prompt_file": "src/skills/configure.md"
+    }
+  ]
+}

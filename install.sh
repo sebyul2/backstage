@@ -13,7 +13,9 @@ echo ""
 
 # 플러그인 디렉토리 생성 및 복사
 mkdir -p "$PLUGIN_DIR"
-cp "$SCRIPT_DIR/src/"* "$PLUGIN_DIR/"
+cp "$SCRIPT_DIR/src/"*.sh "$PLUGIN_DIR/"
+cp "$SCRIPT_DIR/src/"*.ts "$PLUGIN_DIR/"
+cp "$SCRIPT_DIR/src/"*.json "$PLUGIN_DIR/"
 chmod +x "$PLUGIN_DIR"/*.sh
 
 echo "Files installed to: $PLUGIN_DIR"
