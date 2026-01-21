@@ -1,5 +1,5 @@
 {
   "displayLines": 5,
-  "historyTimeout": 30000,
-  "debug": false
+  "historyTimeout": 300000,
+  "enabled": true
 }

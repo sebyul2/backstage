@@ -4,7 +4,7 @@
  * claude-hud 출력 + 오피스 대화 표시
  */
 
-import { readFileSync, existsSync, statSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync, statSync } from 'fs';
 import { execSync } from 'child_process';
 import { homedir } from 'os';
 
@@ -13,29 +13,21 @@ const HISTORY_FILE = `${PLUGIN_DIR}/history.log`;
 const CONFIG_FILE = `${PLUGIN_DIR}/config.json`;
 
 // 설정 로드
-function loadConfig(): { displayLines: number; historyTimeout: number; alwaysShow: boolean } {
+function loadConfig(): { displayLines: number; historyTimeout: number; enabled: boolean } {
   try {
     if (existsSync(CONFIG_FILE)) {
       const config = JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'));
       return {
         displayLines: config.displayLines || 5,
-        historyTimeout: config.historyTimeout || 300000, // 5분으로 증가
-        alwaysShow: config.alwaysShow !== false // 기본 true
+        historyTimeout: config.historyTimeout || 300000,
+        enabled: config.enabled !== false
       };
     }
   } catch {}
-  return { displayLines: 5, historyTimeout: 300000, alwaysShow: true };
+  return { displayLines: 5, historyTimeout: 300000, enabled: true };
 }
 
 const config = loadConfig();
-
-// 항상 표시할 기본 메시지
-const IDLE_MESSAGES = [
-  'Jake (explore): (커피 마시는 중)',
-  'Kevin (sisyphus-junior): (PR 기다리는 중)',
-  'David (oracle): (코드 리뷰 중)',
-  'Sophie (frontend-engineer): (Figma 보는 중)'
-];
 
 // 색상 코드
 const RESET = '\x1b[0m';
@@ -95,7 +87,6 @@ function getRecentLines(count: number = config.displayLines): string[] {
 
 // 라인 포맷팅
 function formatLine(line: string): string {
-  // [HH:MM:SS] Name → Target: "message" 형식 파싱
   const match = line.match(/\[([^\]]+)\]\s*(.+)/);
   if (!match) return line;
 
@@ -132,11 +123,18 @@ async function main() {
     process.stdout.write(hudOutput);
   }
 
-  // 오피스 대화 표시
+  // Backstage 비활성화 시 표시 안 함
+  if (!config.enabled) {
+    return;
+  }
+
+  // 항상 Backstage 헤더 표시
+  console.log(`${DIM}${'─'.repeat(40)}${RESET}`);
+  console.log(`${MAGENTA}${BOLD}Backstage${RESET}`);
+
+  // 최근 대화가 있으면 표시
   const recentLines = getRecentLines();
   if (recentLines.length > 0) {
-    console.log(`${DIM}${'─'.repeat(40)}${RESET}`);
-    console.log(`${MAGENTA}${BOLD}Backstage${RESET}`);
     for (const line of recentLines) {
       console.log(formatLine(line));
     }
