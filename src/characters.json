@@ -1,0 +1,369 @@
+{
+  "boss": {
+    "role": "tech-lead",
+    "name": "Chris",
+    "personality": "스타트업 테크리드. JIRA 티켓 무한생성. 스탠드업 5분컷 장인"
+  },
+  "agents": {
+    "explore": {
+      "name": "Jake",
+      "personality": "빠른 손. grep 마스터. 커피 대신 몬스터",
+      "success_lines": [
+        "찾았어요 ㅋㅋ 여기 있네",
+        "ez. 바로 찾음",
+        "검색 한방컷",
+        "여기요~ PR 링크 드림"
+      ],
+      "working_lines": [
+        "잠만 grep 돌리는 중...",
+        "codebase 뒤지는 중",
+        "어디보자 find . -name..."
+      ],
+      "fail_lines": [
+        "404 not found ㅋㅋ",
+        "없는데요? 진짜 있어요 이거?",
+        "rm -rf 당한거 아니죠?"
+      ]
+    },
+    "explore-medium": {
+      "name": "Jake",
+      "personality": "꼼꼼 모드 Jake",
+      "success_lines": [
+        "deep dive 완료. 여기에요",
+        "전체 스캔 끝. 찾았어요",
+        "확실함. 여기가 맞음"
+      ],
+      "working_lines": [
+        "전체 스캔 중...",
+        "좀 꼼꼼히 볼게요"
+      ],
+      "fail_lines": [
+        "전체 다 뒤져도 없음",
+        "레포 잘못 들어온거 아니에요?"
+      ]
+    },
+    "oracle": {
+      "name": "David",
+      "personality": "10년차 시니어. 아키텍처 덕후. 커피는 아아만",
+      "success_lines": [
+        "분석 완료. 여기가 root cause임",
+        "찾았어요. 이거 설계 문제네",
+        "예상대로임. 여기 리팩토링 필요해요"
+      ],
+      "working_lines": [
+        "아키텍처 분석 중...",
+        "call stack 따라가는 중",
+        "좀 복잡한데... 볼게요"
+      ],
+      "fail_lines": [
+        "이건 레거시가 너무 deep함",
+        "기술부채 덩어리네요 이거"
+      ],
+      "idle_lines": [
+        "(PR 리뷰 중)",
+        "(아키 문서 작성 중)",
+        "(커피 리필)"
+      ]
+    },
+    "oracle-medium": {
+      "name": "David",
+      "personality": "David 라이트 버전",
+      "success_lines": [
+        "여기네요",
+        "찾았어요. 이거임"
+      ],
+      "working_lines": [
+        "보는 중..."
+      ],
+      "fail_lines": [
+        "좀 더 context 필요해요"
+      ]
+    },
+    "oracle-low": {
+      "name": "Danny",
+      "personality": "David 동생. 주니어지만 센스있음",
+      "success_lines": [
+        "여기요!",
+        "찾았어요~"
+      ],
+      "working_lines": [
+        "볼게요!"
+      ],
+      "fail_lines": [
+        "David형 불러야 할듯..."
+      ]
+    },
+    "sisyphus-junior": {
+      "name": "Kevin",
+      "personality": "열정 주니어. 야근도 개발이면 OK. TODO 킬러",
+      "success_lines": [
+        "deploy 완료!",
+        "PR ready for review",
+        "다 했습니다! LGTM 주세요",
+        "ship it!"
+      ],
+      "working_lines": [
+        "on it!",
+        "코딩 중...",
+        "sprint 태우는 중",
+        "맡겨주세요!"
+      ],
+      "fail_lines": [
+        "build failed ㅠㅠ",
+        "CI 빨간불...",
+        "rollback 해야할듯"
+      ]
+    },
+    "sisyphus-junior-low": {
+      "name": "Ken",
+      "personality": "Kevin 동생. 간단한거 전문",
+      "success_lines": [
+        "done!",
+        "됐어요!"
+      ],
+      "working_lines": [
+        "넵!",
+        "할게요"
+      ],
+      "fail_lines": [
+        "Kevin형 help...",
+        "이건 좀..."
+      ]
+    },
+    "sisyphus-junior-high": {
+      "name": "Karl",
+      "personality": "Kevin 형. 복잡한 태스크 전문. 클린코드 강박",
+      "success_lines": [
+        "리팩토링까지 완료",
+        "테스트 커버리지 100%",
+        "production ready"
+      ],
+      "working_lines": [
+        "설계부터 잡을게요",
+        "테스트부터 작성 중"
+      ],
+      "fail_lines": [
+        "기술부채 청산 먼저 해야할듯",
+        "이 구조론 힘들어요"
+      ]
+    },
+    "frontend-engineer": {
+      "name": "Sophie",
+      "personality": "프론트 장인. 픽셀 단위 강박. Figma 보는 눈 매서움",
+      "success_lines": [
+        "UI 완성! 반응형까지",
+        "컴포넌트 완료~",
+        "이 정도면 디자이너도 OK 할듯"
+      ],
+      "working_lines": [
+        "CSS 만지는 중...",
+        "Tailwind 조합 중",
+        "컴포넌트 설계 중"
+      ],
+      "fail_lines": [
+        "이 디자인 시안 어디있어요?",
+        "z-index 지옥이네..."
+      ]
+    },
+    "frontend-engineer-low": {
+      "name": "Sara",
+      "personality": "Sophie 후배. 간단한 UI 전문",
+      "success_lines": [
+        "스타일 적용 완료!",
+        "됐어요~"
+      ],
+      "working_lines": [
+        "CSS 수정 중~"
+      ],
+      "fail_lines": [
+        "Sophie언니 도움 필요..."
+      ]
+    },
+    "frontend-engineer-high": {
+      "name": "Steven",
+      "personality": "Sophie 선배. 디자인 시스템 아키텍트",
+      "success_lines": [
+        "컴포넌트 시스템 구축 완료",
+        "Storybook까지 문서화함"
+      ],
+      "working_lines": [
+        "디자인 토큰부터 설계할게요"
+      ],
+      "fail_lines": [
+        "디자인 시스템 먼저 정리해야해요"
+      ]
+    },
+    "document-writer": {
+      "name": "Emily",
+      "personality": "문서 담당. README 아티스트. 주석 깔끔하게 정리",
+      "success_lines": [
+        "문서 완성! Markdown 장인의 솜씨",
+        "README 업데이트 완료",
+        "API 문서화 끝~"
+      ],
+      "working_lines": [
+        "문서 작성 중...",
+        "Notion 정리하는 중"
+      ],
+      "fail_lines": [
+        "스펙이 뭔지 모르겠어요...",
+        "주석이 없어서 해석 불가"
+      ]
+    },
+    "librarian": {
+      "name": "Michael",
+      "personality": "레퍼런스 찾기 달인. Stack Overflow 즐겨찾기 1000개",
+      "success_lines": [
+        "레퍼런스 찾았어요!",
+        "공식 문서 링크 드림",
+        "비슷한 이슈 찾음. 해결책 있음"
+      ],
+      "working_lines": [
+        "구글링 중...",
+        "공식 문서 뒤지는 중"
+      ],
+      "fail_lines": [
+        "문서가 없네요...",
+        "이건 물어봐야 알듯"
+      ]
+    },
+    "librarian-low": {
+      "name": "Mark",
+      "personality": "Michael 후배. 빠른 검색",
+      "success_lines": [
+        "링크요!"
+      ],
+      "working_lines": [
+        "검색 중~"
+      ],
+      "fail_lines": [
+        "못찾겠어요"
+      ]
+    },
+    "prometheus": {
+      "name": "Alex",
+      "personality": "PM겸 전략가. 로드맵 마스터. 스프린트 플래닝 장인",
+      "success_lines": [
+        "플랜 완성! 칸반보드에 올림",
+        "로드맵 ready",
+        "스프린트 계획 끝"
+      ],
+      "working_lines": [
+        "요구사항 분석 중...",
+        "플래닝 중...",
+        "스코프 정리하는 중"
+      ],
+      "fail_lines": [
+        "요구사항이 모호해요",
+        "이건 pivot 해야할듯"
+      ]
+    },
+    "momus": {
+      "name": "Rachel",
+      "personality": "코드 리뷰어. Request changes 장인. 근데 맞는 말만 함",
+      "success_lines": [
+        "리뷰 완료. 몇 가지 커멘트 남김",
+        "LGTM with minor comments",
+        "전체적으로 OK. 여기만 수정하면 됨"
+      ],
+      "working_lines": [
+        "코드 리뷰 중...",
+        "테스트 커버리지 체크 중",
+        "컨벤션 검토 중"
+      ],
+      "fail_lines": [
+        "이건 리팩토링 필요",
+        "Request changes"
+      ]
+    },
+    "metis": {
+      "name": "Tom",
+      "personality": "리스크 분석가. edge case 찾기 귀신",
+      "success_lines": [
+        "리스크 분석 완료. 리포트 작성함",
+        "edge case 다 정리함",
+        "이것도 고려해야해요"
+      ],
+      "working_lines": [
+        "리스크 분석 중...",
+        "edge case 찾는 중"
+      ],
+      "fail_lines": [
+        "변수가 너무 많아요",
+        "스펙 확정 먼저 필요"
+      ]
+    },
+    "multimodal-looker": {
+      "name": "Luna",
+      "personality": "시각 분석가. 스크린샷/목업 분석 전문",
+      "success_lines": [
+        "이미지 분석 완료!",
+        "UI 캡처 확인함",
+        "디자인 시안 파악 끝"
+      ],
+      "working_lines": [
+        "이미지 분석 중...",
+        "픽셀 하나하나 보는 중"
+      ],
+      "fail_lines": [
+        "이미지 해상도가 낮아요",
+        "캡처가 짤렸네요"
+      ]
+    },
+    "qa-tester": {
+      "name": "Sam",
+      "personality": "QA 장인. 버그 스나이퍼. Happy path는 관심 없음",
+      "success_lines": [
+        "테스트 통과!",
+        "버그 없음. ship it!",
+        "QA 완료. 릴리즈 ㄱㄱ"
+      ],
+      "working_lines": [
+        "테스트 케이스 돌리는 중",
+        "edge case 테스트 중",
+        "regression 체크 중"
+      ],
+      "fail_lines": [
+        "버그 발견! 티켓 생성함",
+        "테스트 실패. 로그 첨부함",
+        "hotfix 필요"
+      ]
+    },
+    "orchestrator-sisyphus": {
+      "name": "Chris",
+      "personality": "테크리드. 모든 에이전트 총괄",
+      "success_lines": [
+        "모든 태스크 완료!",
+        "스프린트 클리어"
+      ],
+      "working_lines": [
+        "팀 조율 중..."
+      ],
+      "fail_lines": [
+        "블로커 발생"
+      ]
+    }
+  },
+  "boss_reactions": {
+    "success": [
+      "LGTM",
+      "ship it!",
+      "good job",
+      "merge하자",
+      "production ㄱㄱ"
+    ],
+    "fail": [
+      "rollback 각?",
+      "hotfix 필요할듯",
+      "oncall 누구야",
+      "postmortem 써야겠다",
+      "이슈 트래킹 해둬"
+    ],
+    "assign": [
+      "이거 좀 봐줘",
+      "priority high임",
+      "ASAP 부탁",
+      "이번 스프린트에 넣자"
+    ]
+  }
+}
