@@ -15,10 +15,17 @@ echo ""
 mkdir -p "$PLUGIN_DIR"
 cp "$SCRIPT_DIR/src/"*.sh "$PLUGIN_DIR/"
 cp "$SCRIPT_DIR/src/"*.ts "$PLUGIN_DIR/"
+cp "$SCRIPT_DIR/src/dialogue-generator.ts" "$PLUGIN_DIR/"
 cp "$SCRIPT_DIR/src/"*.json "$PLUGIN_DIR/"
 chmod +x "$PLUGIN_DIR"/*.sh
 
 echo "Files installed to: $PLUGIN_DIR"
+
+# Install Anthropic SDK
+echo ""
+echo "Installing dependencies..."
+cd "$PLUGIN_DIR"
+bun install @anthropic-ai/sdk
 
 # jq 체크
 if ! command -v jq &> /dev/null; then
@@ -76,4 +83,10 @@ EOF
 
 echo ""
 echo "Installation complete!"
+echo ""
+echo "IMPORTANT: Set your Anthropic API key for AI dialogue generation:"
+echo "  export ANTHROPIC_API_KEY=your_api_key_here"
+echo ""
+echo "Add this to your ~/.zshrc or ~/.bashrc to make it permanent."
+echo ""
 echo "Restart Claude Code to activate."

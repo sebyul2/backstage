@@ -1,5 +1,6 @@
 {
-  "displayLines": 5,
+  "displayLines": 8,
   "historyTimeout": 300000,
-  "enabled": true
+  "enabled": true,
+  "aiEnabled": true
 }
