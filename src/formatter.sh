@@ -62,14 +62,14 @@ format_assignment() {
     echo "Chris (tech-lead) → $agent_name ($agent_type):"
     echo "  \"$boss_line $summary\""
     echo ""
-    echo "$agent_name:"
+    echo "$agent_name ($agent_type):"
     echo "  \"$agent_response\""
     echo ""
 
     # 히스토리에 기록
     mkdir -p "$(dirname "$HISTORY_FILE")"
-    echo "[$timestamp] Chris → $agent_name ($agent_type): $summary" >> "$HISTORY_FILE"
-    echo "[$timestamp] $agent_name: $agent_response" >> "$HISTORY_FILE"
+    echo "[$timestamp] Chris (tech-lead) → $agent_name ($agent_type): $summary" >> "$HISTORY_FILE"
+    echo "[$timestamp] $agent_name ($agent_type): $agent_response" >> "$HISTORY_FILE"
 }
 
 format_result() {
@@ -93,11 +93,11 @@ format_result() {
         echo "  \"$agent_line\""
         echo "  → $summary"
         echo ""
-        echo "Chris:"
+        echo "Chris (tech-lead):"
         echo "  \"$boss_reaction\""
 
-        echo "[$timestamp] $agent_name: $agent_line" >> "$HISTORY_FILE"
-        echo "[$timestamp] Chris: $boss_reaction" >> "$HISTORY_FILE"
+        echo "[$timestamp] $agent_name ($agent_type): $agent_line" >> "$HISTORY_FILE"
+        echo "[$timestamp] Chris (tech-lead): $boss_reaction" >> "$HISTORY_FILE"
     else
         local agent_line=$(get_random_line "$agent_type" "fail_lines")
         local boss_reaction=$(get_boss_reaction "fail")
@@ -106,11 +106,11 @@ format_result() {
         echo "  \"$agent_line\""
         echo "  → $summary"
         echo ""
-        echo "Chris:"
+        echo "Chris (tech-lead):"
         echo "  \"$boss_reaction\""
 
-        echo "[$timestamp] $agent_name: $agent_line" >> "$HISTORY_FILE"
-        echo "[$timestamp] Chris: $boss_reaction" >> "$HISTORY_FILE"
+        echo "[$timestamp] $agent_name ($agent_type): $agent_line" >> "$HISTORY_FILE"
+        echo "[$timestamp] Chris (tech-lead): $boss_reaction" >> "$HISTORY_FILE"
     fi
     echo ""
 }

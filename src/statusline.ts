@@ -13,20 +13,29 @@ const HISTORY_FILE = `${PLUGIN_DIR}/history.log`;
 const CONFIG_FILE = `${PLUGIN_DIR}/config.json`;
 
 // 설정 로드
-function loadConfig(): { displayLines: number; historyTimeout: number } {
+function loadConfig(): { displayLines: number; historyTimeout: number; alwaysShow: boolean } {
   try {
     if (existsSync(CONFIG_FILE)) {
       const config = JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'));
       return {
         displayLines: config.displayLines || 5,
-        historyTimeout: config.historyTimeout || 30000
+        historyTimeout: config.historyTimeout || 300000, // 5분으로 증가
+        alwaysShow: config.alwaysShow !== false // 기본 true
       };
     }
   } catch {}
-  return { displayLines: 5, historyTimeout: 30000 };
+  return { displayLines: 5, historyTimeout: 300000, alwaysShow: true };
 }
 
 const config = loadConfig();
+
+// 항상 표시할 기본 메시지
+const IDLE_MESSAGES = [
+  'Jake (explore): (커피 마시는 중)',
+  'Kevin (sisyphus-junior): (PR 기다리는 중)',
+  'David (oracle): (코드 리뷰 중)',
+  'Sophie (frontend-engineer): (Figma 보는 중)'
+];
 
 // 색상 코드
 const RESET = '\x1b[0m';
