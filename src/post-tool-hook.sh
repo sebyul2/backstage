@@ -25,7 +25,15 @@ if echo "$tool_result" | grep -qi -E "(error|failed|exception|실패|에러|Erro
     success="false"
 fi
 
-# 오피스 형식으로 출력 (stderr로)
-"$FORMATTER" result "$agent_type" "$success" "$tool_result" >&2
+# 오피스 형식으로 출력
+output=$("$FORMATTER" result "$agent_type" "$success" "$tool_result" 2>&1)
+
+# JSON으로 additionalContext 반환 (Claude Code가 표시함)
+jq -n --arg ctx "$output" '{
+  "hookSpecificOutput": {
+    "hookEventName": "PostToolUse",
+    "additionalContext": $ctx
+  }
+}'
 
 exit 0

@@ -5,13 +5,6 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="${BACKSTAGE_DIR:-$HOME/.claude/plugins/backstage}"
 FORMATTER="$SCRIPT_DIR/formatter.sh"
-DEBUG_LOG="$PLUGIN_DIR/debug.log"
-
-# 디버그 로그 (선택적)
-if [ "${BACKSTAGE_DEBUG:-false}" = "true" ]; then
-    mkdir -p "$(dirname "$DEBUG_LOG")"
-    echo "[$(date '+%H:%M:%S')] PreToolUse hook called" >> "$DEBUG_LOG"
-fi
 
 # stdin에서 JSON 입력 읽기
 input=$(cat)
@@ -27,7 +20,15 @@ fi
 agent_type=$(echo "$input" | jq -r '.tool_input.subagent_type // .tool_input.agent // "unknown"')
 prompt=$(echo "$input" | jq -r '.tool_input.prompt // ""')
 
-# 오피스 형식으로 출력 (stderr로 - Claude Code UI에 표시됨)
-"$FORMATTER" assign "$agent_type" "$prompt" >&2
+# 오피스 형식으로 출력
+output=$("$FORMATTER" assign "$agent_type" "$prompt" 2>&1)
+
+# JSON으로 additionalContext 반환 (Claude Code가 표시함)
+jq -n --arg ctx "$output" '{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "additionalContext": $ctx
+  }
+}'
 
 exit 0
