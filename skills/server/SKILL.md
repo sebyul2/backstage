@@ -1,13 +1,13 @@
-# /backstage — Backstage Viewer Toggle
+# /server — Backstage Viewer Server Control
 
-Toggle the backstage pixel art office viewer on/off.
+Start/stop the backstage pixel art office viewer server.
 
 ## Usage
 
 ```
-/backstage        → Show current status + toggle menu
-/backstage on     → Enable backstage + start viewer server
-/backstage off    → Disable backstage + stop viewer server
+/server           → Show current status + toggle menu
+/server on        → Enable backstage + start viewer server
+/server off       → Disable backstage + stop viewer server
 ```
 
 ## Implementation
