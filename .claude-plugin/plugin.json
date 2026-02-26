@@ -1,0 +1,11 @@
+{
+  "name": "claude-backstage",
+  "description": "IT startup office vibes for Claude Code - AI-generated dialogues when agents work",
+  "version": "1.0.0",
+  "author": {
+    "name": "aster"
+  },
+  "homepage": "https://bitbucket.org/spooncast/claude-backstage",
+  "repository": "https://bitbucket.org/spooncast/claude-backstage",
+  "license": "MIT"
+}

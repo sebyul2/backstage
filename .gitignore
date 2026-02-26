@@ -16,6 +16,21 @@ Thumbs.db
 *.swp
 *.swo
 
+# Developer-only (not for distribution)
+.claude/
+
 # Build
 dist/
 build/
+
+# Runtime data
+data/*
+!data/.gitkeep
+*.jsonl
+
+# Temp files
+temp-*.md
+
+# Viewer runtime
+viewer/.omc/
+viewer/node_modules/
