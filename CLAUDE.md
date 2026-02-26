@@ -2,25 +2,31 @@
 
 ## Backstage Start/Stop Control
 
-사용자가 "backstage start" 또는 "backstage stop"이라고 하면:
+사용자가 "backstage start/on" 또는 "backstage stop/off"이라고 하면 `/claude-backstage:backstage-toggle` 스킬을 실행.
+
+또는 직접:
 
 **Start:**
 ```bash
-touch ~/.claude/plugins/backstage/enabled
-# viewer 서버 시작 (이미 실행 중이면 스킵)
+PLUGIN_DIR="$HOME/.claude/plugins/backstage"
+mkdir -p "$PLUGIN_DIR"
+touch "$PLUGIN_DIR/enabled"
+# viewer 서버 시작 (캐시 디렉토리에서, 이미 실행 중이면 스킵)
 if ! curl -s http://localhost:7777/ > /dev/null 2>&1; then
-  cd /Users/aster/workspace/claude-backstage/viewer && nohup bun run server.ts > /tmp/backstage-viewer.log 2>&1 &
-  echo $! > ~/.claude/plugins/backstage/viewer.pid
+  VIEWER_DIR="$(find ~/.claude/plugins/cache/backstage -name server.ts -path '*/viewer/*' 2>/dev/null | head -1 | xargs dirname)"
+  [ -z "$VIEWER_DIR" ] && VIEWER_DIR="${CLAUDE_PLUGIN_ROOT}/viewer"
+  cd "$VIEWER_DIR" && nohup bun run server.ts > /tmp/backstage-viewer.log 2>&1 &
+  echo $! > "$PLUGIN_DIR/viewer.pid"
 fi
 ```
 
 **Stop:**
 ```bash
 rm -f ~/.claude/plugins/backstage/enabled
-# viewer 서버 종료
 PID=$(cat ~/.claude/plugins/backstage/viewer.pid 2>/dev/null)
 [ -n "$PID" ] && kill "$PID" 2>/dev/null
 rm -f ~/.claude/plugins/backstage/viewer.pid
+lsof -ti:7777 | xargs kill 2>/dev/null
 ```
 
 Stop하면 모든 hook이 즉시 exit (토큰 절약), dialogue-generator 호출도 하지 않음.

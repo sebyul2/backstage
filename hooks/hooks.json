@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ./hooks/pre-tool-hook.sh"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-hook.sh"
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ./hooks/post-tool-hook.sh"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-hook.sh"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ./hooks/stop-hook.sh"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/stop-hook.sh"
           }
         ]
       }
@@ -35,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ./hooks/user-prompt-hook.sh"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-hook.sh"
           }
         ]
       }

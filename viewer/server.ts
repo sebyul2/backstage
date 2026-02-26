@@ -74,6 +74,13 @@ const AGENT_NAMES: Record<string, string> = {
   'oh-my-claudecode:document-specialist': 'Emily',
   // dialogue/utility agents
   'dialogue-generator': 'Emily',
+  // guide/research/misc agents
+  'claude-code-guide': 'Michael',
+  'general-purpose': 'Kevin',
+  'Plan': 'Alex', 'plan': 'Alex',
+  // oh-my-claudecode tiered variants
+  'oh-my-claudecode:executor-low': 'Kevin', 'oh-my-claudecode:executor-high': 'Kevin',
+  'oh-my-claudecode:explore-medium': 'Jake',
 };
 
 // Reverse mapping: name → primary role
