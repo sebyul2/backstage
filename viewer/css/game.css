@@ -1,0 +1,288 @@
+/* game.css — Gather Town style retro office viewer (v2.1) */
+
+/* System monospace font — no external font needed */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0a0a12;
+  font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+}
+
+/* ─── App Layout: centered game + chat ──────────────────────── */
+
+#app {
+  width: 1760px;
+  height: 720px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform-origin: center center;
+  transform: translate(-50%, -50%);
+}
+
+/* ─── Game + Chat wrapper (side by side, centered) ──────────── */
+
+#game-container {
+  position: relative;
+  flex-shrink: 0;
+  line-height: 0; /* remove inline gap under canvas */
+}
+
+#game {
+  /* Fixed display size — 30x15 tiles at 48px */
+  width: 1440px;
+  height: 720px;
+
+  border-radius: 4px 0 0 4px;
+  box-shadow:
+    0 0 40px rgba(41, 173, 255, 0.06),
+    0 4px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* ─── Scanline overlay ───────────────────────────────────────── */
+
+#scanlines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1440px;
+  height: 720px;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.015) 3px,
+    rgba(0, 0, 0, 0.015) 6px
+  );
+  z-index: 10;
+  border-radius: 4px 0 0 4px;
+}
+
+/* ─── Chat Log (attached to game canvas) ─────────────────────── */
+
+#chat-log {
+  width: 320px;
+  height: 720px;
+  background: #0c0f1a;
+  border: 1px solid #1a1f35;
+  border-left: 2px solid #1a2540;
+  border-radius: 0 4px 4px 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow:
+    4px 4px 30px rgba(0, 0, 0, 0.5);
+}
+
+.chat-header {
+  padding: 8px 12px;
+  background: #0f1322;
+  border-bottom: 1px solid #1a1f35;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.chat-title {
+  font-size: 16px;
+  color: #29ADFF;
+  letter-spacing: 2px;
+}
+
+.chat-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #5F574F;
+  transition: background 0.3s;
+}
+
+.chat-indicator.live {
+  background: #00E436;
+  box-shadow: 0 0 6px rgba(0, 228, 54, 0.5);
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Individual chat message */
+.chat-msg {
+  padding: 4px 12px;
+  line-height: 1.5;
+  font-size: 15px;
+  color: #8892a8;
+  animation: msg-in 0.2s ease;
+  border-left: 2px solid transparent;
+}
+
+.chat-msg:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.chat-msg .time {
+  color: #556080;
+  font-size: 13px;
+  margin-right: 4px;
+}
+
+.chat-msg .speaker {
+  font-size: 15px;
+  margin-right: 3px;
+}
+
+.chat-msg .text {
+  color: #a0a8c0;
+  word-break: break-word;
+}
+
+/* Type-specific styling */
+.chat-msg.type-assign { border-left-color: #29ADFF; }
+.chat-msg.type-assign .text { color: #b0d0f0; }
+
+.chat-msg.type-done, .chat-msg.type-complete { border-left-color: #00E436; }
+.chat-msg.type-done .text, .chat-msg.type-complete .text { color: #a0e8b0; }
+
+.chat-msg.type-work { border-left-color: #83769C; opacity: 0.6; }
+.chat-msg.type-work .text { color: #8a8aa8; font-size: 14px; }
+
+.chat-msg.type-talk, .chat-msg.type-update { border-left-color: #FFA300; }
+.chat-msg.type-chat { border-left-color: #FFEC27; }
+.chat-msg.type-idle-chat { border-left-color: #FFA300; opacity: 0.7; }
+.chat-msg.type-idle-chat .text { color: #c0a880; }
+.chat-msg.type-user-input { border-left-color: #FF77A8; }
+.chat-msg.type-user-input .text { color: #f0b0d0; }
+
+/* Speaker name colors */
+.speaker-Chris   { color: #60A5FA !important; }
+.speaker-You     { color: #FF77A8 !important; }
+.speaker-Jake    { color: #34D399 !important; }
+.speaker-David   { color: #A78BFA !important; }
+.speaker-Kevin   { color: #FB923C !important; }
+.speaker-Sophie  { color: #F9A8D4 !important; }
+.speaker-Emily   { color: #FCD34D !important; }
+.speaker-Michael { color: #6EE7B7 !important; }
+.speaker-Alex    { color: #93C5FD !important; }
+.speaker-Sam     { color: #FCA5A5 !important; }
+
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Expandable detail ────────────────────────────────────────── */
+
+.chat-msg.has-detail {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.chat-msg.has-detail:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.chat-msg.has-detail .text::after {
+  content: ' ▸';
+  color: #556080;
+  font-size: 11px;
+}
+
+.chat-msg.has-detail.expanded .text::after {
+  content: ' ▾';
+}
+
+.chat-detail {
+  display: none;
+  margin-top: 4px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #7a8298;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.chat-msg.expanded .chat-detail {
+  display: block;
+  animation: detail-in 0.15s ease;
+}
+
+@keyframes detail-in {
+  from { opacity: 0; max-height: 0; }
+  to   { opacity: 1; max-height: 200px; }
+}
+
+/* ─── Loading screen ─────────────────────────────────────────── */
+
+#loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #0a0a12;
+  z-index: 1000;
+  transition: opacity 0.5s ease;
+}
+
+#loading.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#loading .title {
+  font-size: 28px;
+  color: #29ADFF;
+  margin-bottom: 16px;
+  letter-spacing: 4px;
+}
+
+#loading .dots {
+  font-size: 14px;
+  color: #5F574F;
+}
+
+#loading .dots::after {
+  content: '';
+  animation: dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes dots {
+  0%  { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(41, 173, 255, 0.15); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(41, 173, 255, 0.3); }
+
+/* ─── Responsive: zoom is set in #app above ──────────────────── */

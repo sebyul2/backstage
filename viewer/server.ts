@@ -1,6 +1,7 @@
 import { homedir } from "os";
 import * as path from "path";
 import * as fs from "fs";
+import Anthropic from '@anthropic-ai/sdk';
 
 const PLUGIN_DIR = path.join(homedir(), ".claude/plugins/backstage");
 const HISTORY_FILE =
@@ -14,8 +15,27 @@ const CHARACTERS_FILE = (() => {
 })();
 
 const HTML_FILE = path.join(import.meta.dir, "./index.html");
+const VIEWER_DIR = import.meta.dir;
+
+// MIME types for static files
+const MIME_TYPES: Record<string, string> = {
+  ".js": "application/javascript",
+  ".css": "text/css",
+  ".png": "image/png",
+  ".json": "application/json",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".html": "text/html; charset=utf-8",
+};
 
 const PORT = Number(process.env.BACKSTAGE_PORT) || 7777;
+
+let anthropicClient: Anthropic | null = null;
+try {
+    if (process.env.ANTHROPIC_API_KEY) {
+        anthropicClient = new Anthropic();
+    }
+} catch {}
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -36,9 +56,45 @@ const AGENT_NAMES: Record<string, string> = {
   'metis': 'Tom',
   'multimodal-looker': 'Luna',
   'qa-tester': 'Sam',
+  // oh-my-claudecode prefixed agents
+  'oh-my-claudecode:explore': 'Jake',
+  'oh-my-claudecode:executor': 'Kevin', 'oh-my-claudecode:deep-executor': 'Kevin',
+  'oh-my-claudecode:architect': 'David', 'oh-my-claudecode:debugger': 'David',
+  'oh-my-claudecode:code-reviewer': 'David', 'oh-my-claudecode:quality-reviewer': 'David',
+  'oh-my-claudecode:designer': 'Sophie',
+  'oh-my-claudecode:writer': 'Emily',
+  'oh-my-claudecode:scientist': 'Michael',
+  'oh-my-claudecode:planner': 'Alex', 'oh-my-claudecode:analyst': 'Alex',
+  'oh-my-claudecode:qa-tester': 'Sam', 'oh-my-claudecode:test-engineer': 'Sam',
+  'oh-my-claudecode:build-fixer': 'Kevin', 'oh-my-claudecode:code-simplifier': 'Kevin',
+  'oh-my-claudecode:security-reviewer': 'David',
+  'oh-my-claudecode:git-master': 'Kevin',
+  'oh-my-claudecode:verifier': 'Sam',
+  'oh-my-claudecode:critic': 'David',
+  'oh-my-claudecode:document-specialist': 'Emily',
+  // dialogue/utility agents
+  'dialogue-generator': 'Emily',
 };
 
-// Minimal tool info for fallback only (subagents write their own dialogue)
+// Reverse mapping: name → primary role
+const NAME_TO_ROLE: Record<string, string> = {
+  'Jake': 'explore', 'David': 'oracle', 'Kevin': 'sisyphus-junior',
+  'Sophie': 'frontend-engineer', 'Emily': 'document-writer',
+  'Michael': 'librarian', 'Alex': 'prometheus', 'Sam': 'qa-tester',
+};
+
+const AGENT_PERSONALITIES: Record<string, string> = {
+  'Jake': '신입 1년차, 열정적, 밝음',
+  'David': '10년차 시니어, 쿨하고 간결',
+  'Kevin': '성실한 2년차, 가끔 투덜',
+  'Sophie': '디자인 감각, 깔끔함 추구',
+  'Emily': '꼼꼼, 정리 잘함, 친절',
+  'Michael': '조용, 박학다식, 말수 적음',
+  'Alex': '전략적 사고, 큰 그림 좋아함',
+  'Sam': '꼼꼼, 버그 찾으면 기뻐함, 장난기',
+};
+
+// Minimal tool info for fallback only
 const TOOL_INFO: Record<string, { emoji: string; verb: string }> = {
   'Read': { emoji: '📖', verb: '확인 중' },
   'Glob': { emoji: '🔍', verb: '찾는 중' },
@@ -47,6 +103,60 @@ const TOOL_INFO: Record<string, { emoji: string; verb: string }> = {
   'Write': { emoji: '📝', verb: '작성 중' },
   'Bash': { emoji: '💻', verb: '실행 중' },
 };
+
+// ─── Idle chat lines (break room) ───────────────────────────────
+const IDLE_CHATS: string[] = [
+  '커피 한 잔 더 마셔야겠다',
+  '오늘 점심 뭐 먹지',
+  '아 오늘 금요일이었으면...',
+  '커피 맛있다 ☕',
+  '코드 리뷰 언제 하지',
+  '어제 넷플릭스 뭐 봤어?',
+  '배고프다...',
+  '자판기 커피도 괜찮네',
+  '오늘 야근인가...',
+  '주말에 뭐 해?',
+  '아 졸려 😴',
+  '이거 다 언제 끝나지',
+  '맥주 마시고 싶다 🍺',
+  '치킨 먹고 싶다',
+  '오후에 회의 있어?',
+  '카페인 충전 완료 ⚡',
+  '런치 메뉴 정했어?',
+  '아 날씨 좋다',
+  '코딩하다 머리 터질 것 같아',
+  '디버깅 지옥에서 탈출했다',
+  '깃 충돌 또 났어 ㅠ',
+  'PR 리뷰 좀 해줘~',
+  '테스트 다 통과했어! 🎉',
+  '빌드 왜 이렇게 오래 걸려',
+  '슬랙 알림 좀 꺼야겠다',
+  '점심 같이 먹을 사람?',
+  '아메리카노 하나 더',
+  '오늘 배포일이야?',
+  '버그 잡았다! 🐛',
+  '타입스크립트 왜 이래...',
+  'null이 또 터졌어',
+  '이 로직 누가 짠 거야',
+  '스프린트 끝나간다',
+  '회의실 잡았어?',
+  '와이파이 느려...',
+  '모니터 하나 더 갖고 싶다',
+  '키보드 새로 살까',
+  '에어컨 좀 세다',
+  '택배 왔대!',
+  '간식 누가 사왔어?',
+  '자판기 아이스티 맛있어',
+  '오늘 퇴근 몇 시야',
+  '스탠딩 데스크 좋네',
+  '눈이 피곤하다',
+  '스트레칭 좀 해야지',
+  '회의 끝났어?',
+  '점심 먹고 졸려...',
+  '다음 스프린트 뭐야',
+  '어제 뭐 했어?',
+  '히터 좀 틀어줘',
+];
 
 // ─── Utility functions ──────────────────────────────────────────
 
@@ -85,7 +195,6 @@ function readNewLines(filePath: string, fromOffset: number): { lines: unknown[];
 
   const stat = fs.statSync(filePath);
 
-  // File was truncated/rotated - reset offset
   if (stat.size < fromOffset) {
     fromOffset = 0;
   }
@@ -113,31 +222,86 @@ function readNewLines(filePath: string, fromOffset: number): { lines: unknown[];
   }
 }
 
+// ─── Idle Chat Generator (Break Room) ───────────────────────────
+
+let lastIdleChatTime = Date.now();
+
+async function generateIdleChat(): Promise<void> {
+  const now = Date.now();
+  if (now - lastIdleChatTime < 20_000) return;
+  lastIdleChatTime = now;
+
+  const names = Object.keys(AGENT_PERSONALITIES);
+  const name = names[Math.floor(Math.random() * names.length)];
+  const role = NAME_TO_ROLE[name] || 'agent';
+  let msg: string | null = null;
+
+  // Try Haiku API first
+  if (anthropicClient) {
+    try {
+      const personality = AGENT_PERSONALITIES[name] || '';
+      const humor = Math.random() < 0.4;
+      const style = humor
+        ? '유머/드립을 섞어서. IT개발자 밈, 야근드립, 커피드립, 버그드립 등. 웃기게.'
+        : '자연스럽고 일상적으로. 편하게 수다떠는 느낌.';
+      const response = await anthropicClient.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 100,
+        messages: [{
+          role: 'user',
+          content: `IT 스타트업 휴게실에서 ${name}(${personality})이 혼잣말 또는 동료에게 한마디.
+20-50자. 한국어. 이모지 가끔. ${style}
+문장만 출력. 따옴표 없이. 설명 없이.`
+        }],
+      });
+      const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : null;
+      if (text && text.length > 0 && text.length < 80) {
+        msg = text;
+      }
+    } catch {}
+  }
+
+  // Fallback to predefined
+  if (!msg) {
+    msg = IDLE_CHATS[Math.floor(Math.random() * IDLE_CHATS.length)];
+  }
+
+  const ts = new Date().toTimeString().slice(0, 8);
+  const epoch = Math.floor(Date.now() / 1000);
+  const entry = JSON.stringify({
+    ts, epoch, type: 'idle-chat',
+    speaker: name, role, msg,
+  });
+
+  ensureHistoryFile();
+  try { fs.appendFileSync(HISTORY_FILE, entry + '\n'); } catch {}
+}
+
 // ─── Transcript Scanner (Agent Work Detection) ─────────────────
 
 let transcriptOffset = 0;
 let transcriptPath: string | null = null;
 let transcriptLastCheck = 0;
 const agentTypeMap: Record<string, string> = {};
+const agentIdToType: Record<string, string> = {};
+const subagentOffsets = new Map<string, number>();
 const recordedToolIds = new Set<string>();
-let lastChrisTalkEpoch = 0; // Rate-limit Chris talk (30s)
-const recordedTextHashes = new Set<string>(); // Dedup
+let lastChrisTalkEpoch = 0;
+const recordedTextHashes = new Set<string>();
 
-// Find transcript .jsonl for THIS project only
+// Track active agents for auto-completion detection
+const activeAgents: Map<string, { lastActivity: number; agentName: string; agentType: string }> = new Map();
+const AGENT_IDLE_TIMEOUT = 30_000; // 30 seconds without activity → auto "done"
+
 function findCurrentTranscript(): string | null {
   const projectsDir = path.join(homedir(), ".claude/projects");
   if (!fs.existsSync(projectsDir)) return null;
-
-  // Encode current working directory to match Claude's project dir naming
-  const cwd = process.cwd();
-  const encodedCwd = cwd.replace(/\//g, "-");
 
   let newest: { path: string; mtime: number } | null = null;
 
   try {
     const projectDirs = fs.readdirSync(projectsDir);
     for (const dir of projectDirs) {
-      // Only match directories for THIS project
       if (!dir.includes("claude-backstage")) continue;
 
       const fullDir = path.join(projectsDir, dir);
@@ -168,14 +332,43 @@ function findCurrentTranscript(): string | null {
 function scanTranscriptForAgentWork(): void {
   const now = Date.now();
 
-  // Re-discover transcript every 10 seconds (handles new sessions)
   if (!transcriptPath || (now - transcriptLastCheck) > 10_000) {
     transcriptLastCheck = now;
     const found = findCurrentTranscript();
     if (found && found !== transcriptPath) {
       transcriptPath = found;
-      transcriptOffset = 0; // New transcript, start from beginning
       recordedToolIds.clear();
+
+      // One-time scan: populate agentTypeMap from entire transcript
+      // (needed so new agent_progress events can resolve agent names)
+      try {
+        const fullContent = fs.readFileSync(found, 'utf-8');
+        for (const line of fullContent.trim().split('\n')) {
+          try {
+            const e = JSON.parse(line);
+            if (e.message?.content) {
+              for (const c of e.message.content) {
+                if (c.type === 'tool_use' && c.name === 'Task' && c.input?.subagent_type) {
+                  agentTypeMap[c.id] = c.input.subagent_type;
+                }
+              }
+            }
+            if (e.type === 'progress' && e.data?.type === 'agent_progress') {
+              const aid = e.data?.agentId;
+              if (aid && e.parentToolUseID && agentTypeMap[e.parentToolUseID]) {
+                agentIdToType[aid] = agentTypeMap[e.parentToolUseID];
+              }
+            }
+          } catch {}
+        }
+      } catch {}
+
+      // Skip historical work events (only process new ones)
+      try {
+        transcriptOffset = fs.statSync(found).size;
+      } catch {
+        transcriptOffset = 0;
+      }
     }
     if (!transcriptPath) return;
   }
@@ -185,11 +378,9 @@ function scanTranscriptForAgentWork(): void {
   let stat: fs.Stats;
   try { stat = fs.statSync(transcriptPath); } catch { return; }
 
-  // Handle truncation
   if (stat.size < transcriptOffset) transcriptOffset = 0;
   if (stat.size <= transcriptOffset) return;
 
-  // Cap read size at 512KB per scan
   let readFrom = transcriptOffset;
   const maxRead = 512 * 1024;
   if (stat.size - readFrom > maxRead) {
@@ -212,7 +403,6 @@ function scanTranscriptForAgentWork(): void {
   const lines = content.trim().split("\n");
   if (lines.length === 0) return;
 
-  // Build/update agentTypeMap from new lines
   for (const line of lines) {
     try {
       const entry = JSON.parse(line);
@@ -226,14 +416,18 @@ function scanTranscriptForAgentWork(): void {
     } catch {}
   }
 
-  // Collect new agent tool uses (latest per agent only)
-  const latestPerAgent: Map<string, { agentName: string; agentType: string; tool: string; target: string }> = new Map();
+  const latestPerAgent: Map<string, { agentName: string; agentType: string; tool: string; target: string; detail: string }> = new Map();
 
   for (const line of lines) {
     try {
       const entry = JSON.parse(line);
 
       if (entry.type === "progress" && entry.data?.type === "agent_progress") {
+        const aid = entry.data?.agentId;
+        if (aid && entry.parentToolUseID && agentTypeMap[entry.parentToolUseID]) {
+          agentIdToType[aid] = agentTypeMap[entry.parentToolUseID];
+        }
+
         const msg = entry.data?.message?.message;
         if (!msg?.content) continue;
 
@@ -248,28 +442,41 @@ function scanTranscriptForAgentWork(): void {
           const shortTarget = target.split("/").pop()?.slice(0, 30) || target.slice(0, 30);
           const agentId: string = entry.data?.agentId || "unknown";
 
-          // Find agent type
           let agentType = "agent";
           if (entry.parentToolUseID && agentTypeMap[entry.parentToolUseID]) {
             agentType = agentTypeMap[entry.parentToolUseID];
           }
 
-          // Skip dialogue-generator
-          if (agentType === "dialogue-generator") continue;
-
           const toolId = `${agentId}:${toolName}:${shortTarget}`;
           if (recordedToolIds.has(toolId)) continue;
           recordedToolIds.add(toolId);
 
+          // Build detail: full context depending on tool type
+          let detail = "";
+          if (toolName === "Bash") {
+            detail = (input.command || "").slice(0, 200);
+          } else if (toolName === "Read") {
+            detail = input.file_path || "";
+            if (input.offset || input.limit) {
+              detail += ` (lines ${input.offset ?? 1}–${input.limit ? (input.offset ?? 1) + input.limit - 1 : "end"})`;
+            }
+          } else if (toolName === "Edit" || toolName === "Write") {
+            detail = input.file_path || "";
+          } else if (toolName === "Grep") {
+            detail = `pattern: ${(input.pattern || "").slice(0, 80)}`;
+            if (input.path) detail += ` in ${input.path}`;
+          } else if (toolName === "Glob") {
+            detail = input.pattern || "";
+            if (input.path) detail += ` in ${input.path}`;
+          }
+
           const agentName = AGENT_NAMES[agentType] || "Agent";
-          // Keep only latest per agent (avoid flooding)
-          latestPerAgent.set(agentName, { agentName, agentType, tool: toolName, target: shortTarget });
+          latestPerAgent.set(agentName, { agentName, agentType, tool: toolName, target: shortTarget, detail });
         }
       }
     } catch {}
   }
 
-  // Write to history
   if (latestPerAgent.size > 0) {
     ensureHistoryFile();
     for (const tool of latestPerAgent.values()) {
@@ -283,13 +490,72 @@ function scanTranscriptForAgentWork(): void {
         speaker: tool.agentName,
         role: tool.agentType,
         msg,
+        ...(tool.detail ? { detail: tool.detail } : {}),
       });
 
       try { fs.appendFileSync(HISTORY_FILE, entry + "\n"); } catch {}
     }
+
+    // Update active agent tracking (exclude Chris — boss never "completes")
+    for (const tool of latestPerAgent.values()) {
+      if (tool.agentName === 'Chris') continue;
+      activeAgents.set(tool.agentName, {
+        lastActivity: Date.now(),
+        agentName: tool.agentName,
+        agentType: tool.agentType,
+      });
+    }
   }
 
-  // ── Chris talk: 짧게 요약, 30초 간격 ─────────────────────────
+  // Auto-complete agents with no recent activity
+  const now2 = Date.now();
+  for (const [name, info] of activeAgents) {
+    if (now2 - info.lastActivity > AGENT_IDLE_TIMEOUT) {
+      const ts = new Date().toTimeString().slice(0, 8);
+      const epoch = Math.floor(now2 / 1000);
+      const entry = JSON.stringify({
+        ts, epoch, type: "done",
+        speaker: name, role: info.agentType,
+        msg: "작업 완료",
+      });
+      try { fs.appendFileSync(HISTORY_FILE, entry + "\n"); } catch {}
+      activeAgents.delete(name);
+    }
+  }
+
+  // User input detection
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry.type !== "human" || entry.message?.role !== "human") continue;
+      if (!entry.message?.content) continue;
+
+      for (const block of entry.message.content) {
+        if (block.type !== "text" || !block.text) continue;
+        const text = block.text.trim();
+        if (text.length < 3 || text.length > 200) continue;
+        if (text.startsWith("<") || text.startsWith("{")) continue;
+
+        const hash = `user:${text.slice(0, 60)}`;
+        if (recordedTextHashes.has(hash)) continue;
+        recordedTextHashes.add(hash);
+
+        const ts = new Date().toTimeString().slice(0, 8);
+        const epoch = Math.floor(Date.now() / 1000);
+        let msg = text.replace(/\n/g, " ");
+        if (msg.length > 100) msg = msg.slice(0, 100) + "...";
+
+        const userEntry = JSON.stringify({
+          ts, epoch, type: "user-input",
+          speaker: "You", role: "client", msg,
+        });
+        try { fs.appendFileSync(HISTORY_FILE, userEntry + "\n"); } catch {}
+        break;
+      }
+    } catch {}
+  }
+
+  // Chris talk
   const nowEpoch = Math.floor(Date.now() / 1000);
 
   if (nowEpoch - lastChrisTalkEpoch >= 30) {
@@ -305,17 +571,13 @@ function scanTranscriptForAgentWork(): void {
           const text = block.text.trim();
           if (text.length < 15) continue;
 
-          // Skip noise
           if (text.startsWith("<") || text.startsWith("{") || text.startsWith("```")) continue;
-          // Korean only
           if (!/[\uAC00-\uD7AF\u3130-\u318F]/.test(text.slice(0, 200))) continue;
 
-          // Dedup
           const hash = text.slice(0, 80);
           if (recordedTextHashes.has(hash)) continue;
           recordedTextHashes.add(hash);
 
-          // Extract first meaningful Korean line only (짧게!)
           const meaningful = text.split("\n")
             .map(l => l.trim())
             .filter(l => l.length > 8)
@@ -324,7 +586,6 @@ function scanTranscriptForAgentWork(): void {
 
           if (meaningful.length === 0) continue;
 
-          // 2줄까지, 총 150자. 뷰어 버블이 expand/collapse 처리
           let msg = meaningful.slice(0, 2)
             .map(l => l.replace(/\*\*/g, "").replace(/`/g, "").replace(/^\s*>\s*/, ""))
             .join(" ");
@@ -340,32 +601,138 @@ function scanTranscriptForAgentWork(): void {
           });
 
           try { fs.appendFileSync(HISTORY_FILE, chatEntry + "\n"); } catch {}
-          break; // 1개만
+          break;
         }
-        if (lastChrisTalkEpoch === nowEpoch) break; // 이미 기록했으면 끝
+        if (lastChrisTalkEpoch === nowEpoch) break;
       } catch {}
     }
   }
 
-  // Prune text hashes
+  // Prune
   if (recordedTextHashes.size > 300) {
     const arr = [...recordedTextHashes];
     recordedTextHashes.clear();
     for (const h of arr.slice(-150)) recordedTextHashes.add(h);
   }
 
-  // Prune recorded IDs to prevent unbounded growth
   if (recordedToolIds.size > 1000) {
     const arr = [...recordedToolIds];
     recordedToolIds.clear();
     for (const id of arr.slice(-500)) recordedToolIds.add(id);
   }
 
-  // Prune agentTypeMap
   const mapKeys = Object.keys(agentTypeMap);
   if (mapKeys.length > 200) {
     for (const k of mapKeys.slice(0, mapKeys.length - 100)) {
       delete agentTypeMap[k];
+    }
+  }
+
+  scanSubagentFiles();
+}
+
+function scanSubagentFiles(): void {
+  if (!transcriptPath) return;
+
+  const mainName = path.basename(transcriptPath, ".jsonl");
+  const subagentDir = path.join(path.dirname(transcriptPath), mainName, "subagents");
+
+  if (!fs.existsSync(subagentDir)) return;
+
+  let files: string[];
+  try { files = fs.readdirSync(subagentDir); } catch { return; }
+
+  const latestPerAgent = new Map<string, { agentName: string; agentType: string; tool: string; target: string }>();
+
+  for (const file of files) {
+    if (!file.endsWith(".jsonl")) continue;
+
+    const filePath = path.join(subagentDir, file);
+    const agentId = file.replace("agent-", "").replace(".jsonl", "");
+    const agentType = agentIdToType[agentId] || "agent";
+
+    let stat: fs.Stats;
+    try { stat = fs.statSync(filePath); } catch { continue; }
+
+    // First encounter after server restart: skip to end (don't replay old activity)
+    if (!subagentOffsets.has(filePath)) {
+      subagentOffsets.set(filePath, stat.size);
+      continue;
+    }
+
+    let offset = subagentOffsets.get(filePath)!;
+    if (stat.size < offset) offset = 0;
+    if (stat.size <= offset) { subagentOffsets.set(filePath, offset); continue; }
+
+    let content: string;
+    let fd: number | null = null;
+    const readSize = Math.min(stat.size - offset, 256 * 1024);
+    try {
+      fd = fs.openSync(filePath, "r");
+      const buf = Buffer.alloc(readSize);
+      const bytesRead = fs.readSync(fd, buf, 0, buf.length, offset);
+      content = buf.subarray(0, bytesRead).toString("utf-8");
+      subagentOffsets.set(filePath, offset + bytesRead);
+    } catch { continue; } finally {
+      if (fd !== null) fs.closeSync(fd);
+    }
+
+    const lines = content.trim().split("\n");
+    const agentName = AGENT_NAMES[agentType] || "Agent";
+
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (!entry.message?.content) continue;
+        for (const block of entry.message.content) {
+          if (block.type !== "tool_use" || !block.name) continue;
+
+          const toolName = block.name;
+          if (!["Read", "Glob", "Grep", "Edit", "Write", "Bash"].includes(toolName)) continue;
+
+          const input = block.input || {};
+          const target: string = input.file_path || input.pattern || input.command || "";
+          const shortTarget = target.split("/").pop()?.slice(0, 30) || target.slice(0, 30);
+
+          const toolId = `sub:${agentId}:${toolName}:${shortTarget}`;
+          if (recordedToolIds.has(toolId)) continue;
+          recordedToolIds.add(toolId);
+
+          latestPerAgent.set(agentName, { agentName, agentType, tool: toolName, target: shortTarget });
+        }
+      } catch {}
+    }
+  }
+
+  if (latestPerAgent.size > 0) {
+    ensureHistoryFile();
+    for (const tool of latestPerAgent.values()) {
+      const info = TOOL_INFO[tool.tool] || { emoji: "🔧", verb: "작업 중" };
+      const ts = new Date().toTimeString().slice(0, 8);
+      const epoch = Math.floor(Date.now() / 1000);
+      const msg = `${info.emoji} ${tool.target || tool.tool} ${info.verb}`;
+
+      const histEntry = JSON.stringify({
+        ts, epoch, type: "work",
+        speaker: tool.agentName,
+        role: tool.agentType,
+        msg,
+      });
+
+      try { fs.appendFileSync(HISTORY_FILE, histEntry + "\n"); } catch {}
+
+      // Track for auto-completion (so done events get generated after 30s idle)
+      activeAgents.set(tool.agentName, {
+        lastActivity: Date.now(),
+        agentName: tool.agentName,
+        agentType: tool.agentType,
+      });
+    }
+  }
+
+  if (subagentOffsets.size > 50) {
+    for (const [p] of subagentOffsets) {
+      if (!fs.existsSync(p)) subagentOffsets.delete(p);
     }
   }
 }
@@ -425,7 +792,6 @@ function handleSSE(): Response {
 
       send("connected", JSON.stringify({ ts: new Date().toISOString() }));
 
-      // Primary: fs.watch with 50ms debounce
       try {
         watcher = fs.watch(HISTORY_FILE, () => {
           if (closed) return;
@@ -433,14 +799,10 @@ function handleSSE(): Response {
           debounceTimer = setTimeout(checkForUpdates, 50);
         });
         watcher.on("error", () => cleanup());
-      } catch {
-        // Watch failed, polling will handle it
-      }
+      } catch {}
 
-      // Fallback: poll every 1 second
       pollTimer = setInterval(checkForUpdates, 1000);
 
-      // Heartbeat every 15 seconds
       heartbeatTimer = setInterval(() => {
         send("ping", JSON.stringify({ ts: new Date().toISOString() }));
       }, 15_000);
@@ -498,12 +860,50 @@ async function handleCharacters(): Promise<Response> {
   }
 }
 
+async function handleMessage(req: Request): Promise<Response> {
+  try {
+    const body = await req.json() as { text?: string };
+    const text = body?.text;
+    if (!text || typeof text !== "string" || text.trim().length === 0) {
+      return new Response(JSON.stringify({ error: "empty message" }), {
+        status: 400,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    }
+
+    const ts = new Date().toTimeString().slice(0, 8);
+    const epoch = Math.floor(Date.now() / 1000);
+    const entry = {
+      ts,
+      epoch,
+      type: "user-input",
+      speaker: "You",
+      role: "client",
+      msg: text.trim().slice(0, 200),
+    };
+
+    ensureHistoryFile();
+    fs.appendFileSync(HISTORY_FILE, JSON.stringify(entry) + "\n");
+
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  } catch {
+    return new Response(JSON.stringify({ error: "invalid request" }), {
+      status: 400,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  }
+}
+
 async function handleRoot(): Promise<Response> {
   try {
     const file = Bun.file(HTML_FILE);
     return new Response(file, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
       },
     });
   } catch {
@@ -511,11 +911,42 @@ async function handleRoot(): Promise<Response> {
   }
 }
 
+// ─── Static File Handler ─────────────────────────────────────────
+
+async function handleStaticFile(pathname: string): Promise<Response> {
+  const normalized = path.normalize(pathname);
+  if (normalized.includes("..")) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const filePath = path.join(VIEWER_DIR, normalized);
+  try {
+    const file = Bun.file(filePath);
+    const exists = await file.exists();
+    if (!exists) {
+      return new Response("Not Found", { status: 404, headers: CORS_HEADERS });
+    }
+
+    const ext = path.extname(filePath);
+    const contentType = MIME_TYPES[ext] || "application/octet-stream";
+
+    return new Response(file, {
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": contentType,
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+      },
+    });
+  } catch {
+    return new Response("Not Found", { status: 404, headers: CORS_HEADERS });
+  }
+}
+
 // ─── Server ─────────────────────────────────────────────────────
 
 const server = Bun.serve({
   port: PORT,
-  idleTimeout: 255, // Max for Bun — SSE connections need long idle
+  idleTimeout: 255,
   async fetch(req) {
     const url = new URL(req.url);
 
@@ -530,9 +961,17 @@ const server = Bun.serve({
         return handleSSE();
       case "/history":
         return handleHistory();
+      case "/message":
+        if (req.method === "POST") {
+          return await handleMessage(req);
+        }
+        return new Response("Method Not Allowed", { status: 405, headers: CORS_HEADERS });
       case "/characters":
         return await handleCharacters();
       default:
+        if (url.pathname.startsWith("/js/") || url.pathname.startsWith("/css/") || url.pathname.startsWith("/sprites/")) {
+          return await handleStaticFile(url.pathname);
+        }
         return new Response("Not Found", {
           status: 404,
           headers: CORS_HEADERS,
@@ -543,17 +982,24 @@ const server = Bun.serve({
 
 console.log(`Backstage viewer running at http://localhost:${PORT}`);
 
-// ─── Transcript Scanner Timer ───────────────────────────────────
-// Scans Claude Code transcript every 3 seconds for subagent tool use
+// ─── Timers ──────────────────────────────────────────────────────
+
+// Transcript scanner: every 3 seconds
 const transcriptScanTimer = setInterval(() => {
   try { scanTranscriptForAgentWork(); } catch {}
 }, 3000);
+
+// Idle chat generator: every 20 seconds
+const idleChatTimer = setInterval(() => {
+  try { generateIdleChat(); } catch {}
+}, 20_000);
 
 // ─── Shutdown ───────────────────────────────────────────────────
 
 function shutdown(): void {
   console.log("\nShutting down...");
   clearInterval(transcriptScanTimer);
+  clearInterval(idleChatTimer);
   for (const conn of activeConnections) {
     conn.close();
   }
