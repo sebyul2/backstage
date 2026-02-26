@@ -30,9 +30,9 @@ fi
 
 # 2. 글로벌 CLAUDE.md에서 backstage 섹션 제거
 if [ -f "$GLOBAL_CLAUDE_MD" ]; then
-    if grep -q "CLAUDE-BACKSTAGE-START" "$GLOBAL_CLAUDE_MD"; then
+    if grep -q "BACKSTAGE:START" "$GLOBAL_CLAUDE_MD"; then
         echo "Removing backstage section from global CLAUDE.md"
-        sed -i.bak '/# --- CLAUDE-BACKSTAGE-START ---/,/# --- CLAUDE-BACKSTAGE-END ---/d' "$GLOBAL_CLAUDE_MD"
+        sed -i.bak '/<!-- BACKSTAGE:START -->/,/<!-- BACKSTAGE:END -->/d' "$GLOBAL_CLAUDE_MD"
         rm -f "$GLOBAL_CLAUDE_MD.bak"
         echo "Removed backstage section"
     else

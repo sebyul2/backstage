@@ -157,13 +157,46 @@ fi
 
 echo ""
 
-# 4. Create enabled file
+# 4. Inject backstage protocol into global CLAUDE.md
+echo "Injecting backstage protocol into global CLAUDE.md ..."
+
+GLOBAL_CLAUDE_MD="$HOME/.claude/CLAUDE.md"
+PROTOCOL_FILE="$SCRIPT_DIR/CLAUDE.md"
+
+if [ ! -f "$PROTOCOL_FILE" ]; then
+  echo -e "  ${RED}✗ Protocol file not found: $PROTOCOL_FILE${NC}"
+else
+  # Ensure global CLAUDE.md exists
+  touch "$GLOBAL_CLAUDE_MD"
+
+  # Remove existing backstage section if present
+  if grep -q "BACKSTAGE:START" "$GLOBAL_CLAUDE_MD"; then
+    echo -e "  ${YELLOW}⚠ Updating existing backstage protocol${NC}"
+    sed -i.bak '/<!-- BACKSTAGE:START -->/,/<!-- BACKSTAGE:END -->/d' "$GLOBAL_CLAUDE_MD"
+    rm -f "$GLOBAL_CLAUDE_MD.bak"
+  fi
+
+  # Append with markers
+  {
+    echo ""
+    echo "<!-- BACKSTAGE:START -->"
+    cat "$PROTOCOL_FILE"
+    echo ""
+    echo "<!-- BACKSTAGE:END -->"
+  } >> "$GLOBAL_CLAUDE_MD"
+
+  echo -e "  ${GREEN}✓${NC} Backstage protocol injected into global CLAUDE.md"
+fi
+
+echo ""
+
+# 5. Create enabled file
 touch "$PLUGIN_DIR/enabled"
 echo -e "${GREEN}✓${NC} Backstage enabled ($PLUGIN_DIR/enabled)"
 
 echo ""
 
-# 5. Success message
+# 6. Success message
 echo -e "${GREEN}================================${NC}"
 echo -e "${GREEN}✓ Claude Backstage installed!${NC}"
 echo -e "${GREEN}================================${NC}"
