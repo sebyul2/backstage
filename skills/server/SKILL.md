@@ -31,7 +31,7 @@ Then use AskUserQuestion to ask: "Backstage를 켜시겠습니까? / 끄시겠�
 
 Run this **single Bash command** (copy exactly, do not modify):
 ```bash
-mkdir -p ~/.claude/plugins/backstage && touch ~/.claude/plugins/backstage/enabled && lsof -ti:7777 | xargs kill 2>/dev/null; sleep 0.3; VIEWER_DIR="${CLAUDE_PLUGIN_ROOT}/viewer"; [ ! -d "$VIEWER_DIR" ] && VIEWER_DIR=~/.claude/plugins/backstage/viewer; cd "$VIEWER_DIR" && nohup perl -e 'use POSIX "setsid"; setsid(); exec @ARGV' bun server.ts > /tmp/backstage-viewer.log 2>&1 & echo $! > ~/.claude/plugins/backstage/viewer.pid; sleep 1; lsof -ti:7777 > /dev/null 2>&1 && echo "OK: http://localhost:7777" || echo "FAIL: check /tmp/backstage-viewer.log"
+mkdir -p ~/.claude/plugins/backstage && touch ~/.claude/plugins/backstage/enabled && lsof -ti:7777 | xargs kill 2>/dev/null; sleep 0.3; VIEWER_DIR="$(ls -d ~/.claude/plugins/cache/backstage/claude-backstage/*/viewer 2>/dev/null | sort -V | tail -1)"; [ -z "$VIEWER_DIR" ] && VIEWER_DIR=~/.claude/plugins/backstage/viewer; cd "$VIEWER_DIR" && bun server.ts; sleep 1; lsof -ti:7777 > /dev/null 2>&1 && echo "OK: http://localhost:7777" || echo "FAIL: check /tmp/backstage-viewer.log"
 ```
 
 Report the output. Do not add extra commands.
@@ -51,5 +51,6 @@ Report the output. Do not add extra commands.
 - dialogue-generator is not called when OFF
 - The enabled file at `~/.claude/plugins/backstage/enabled` controls all hook behavior
 - ON always kills existing server first, then starts fresh (no stale process issues)
-- Uses `perl POSIX::setsid()` to detach from parent shell process group (prevents SIGTERM on Bash exit)
+- server.ts self-daemonizes (spawn detached child → parent exits) — no nohup/setsid needed
+- Viewer directory auto-detected: finds latest version in plugin cache via `sort -V`
 - Liveness check uses `lsof -ti:7777` (port check), not `curl` (avoids false positives)

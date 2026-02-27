@@ -8,25 +8,20 @@
 
 **Start:**
 ```bash
-PLUGIN_DIR="$HOME/.claude/plugins/backstage"
-mkdir -p "$PLUGIN_DIR"
-touch "$PLUGIN_DIR/enabled"
-# viewer 서버 시작 (캐시 디렉토리에서, 이미 실행 중이면 스킵)
-if ! curl -s http://localhost:7777/ > /dev/null 2>&1; then
-  VIEWER_DIR="$(find ~/.claude/plugins/cache/backstage -name server.ts -path '*/viewer/*' 2>/dev/null | head -1 | xargs dirname)"
-  [ -z "$VIEWER_DIR" ] && VIEWER_DIR="${CLAUDE_PLUGIN_ROOT}/viewer"
-  cd "$VIEWER_DIR" && nohup bun run server.ts > /tmp/backstage-viewer.log 2>&1 &
-  echo $! > "$PLUGIN_DIR/viewer.pid"
+mkdir -p ~/.claude/plugins/backstage && touch ~/.claude/plugins/backstage/enabled
+# viewer 서버 시작 (최신 버전 자동 탐색, self-daemonize)
+if ! lsof -ti:7777 > /dev/null 2>&1; then
+  VIEWER_DIR="$(ls -d ~/.claude/plugins/cache/backstage/claude-backstage/*/viewer 2>/dev/null | sort -V | tail -1)"
+  [ -z "$VIEWER_DIR" ] && VIEWER_DIR=~/.claude/plugins/backstage/viewer
+  cd "$VIEWER_DIR" && bun server.ts
 fi
 ```
 
 **Stop:**
 ```bash
 rm -f ~/.claude/plugins/backstage/enabled
-PID=$(cat ~/.claude/plugins/backstage/viewer.pid 2>/dev/null)
-[ -n "$PID" ] && kill "$PID" 2>/dev/null
-rm -f ~/.claude/plugins/backstage/viewer.pid
 lsof -ti:7777 | xargs kill 2>/dev/null
+rm -f ~/.claude/plugins/backstage/viewer.pid
 ```
 
 Stop하면 모든 hook이 즉시 exit (토큰 절약), dialogue-generator 호출도 하지 않음.

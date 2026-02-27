@@ -1069,5 +1069,5 @@ function shutdown(): void {
   process.exit(0);
 }
 
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+process.on("SIGTERM", () => { console.log("Received SIGTERM"); shutdown(); });
+process.on("SIGINT", () => { console.log("Received SIGINT"); shutdown(); });
