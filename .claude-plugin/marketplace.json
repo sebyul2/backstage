@@ -9,7 +9,7 @@
     {
       "name": "claude-backstage",
       "description": "Pixel art office viewer with AI-generated dialogues, agent lifecycle, A* pathfinding, and break room idle chat",
-      "version": "2.3.0",
+      "version": "2.4.0",
       "author": {
         "name": "aster"
       },

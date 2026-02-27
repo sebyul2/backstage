@@ -45,42 +45,46 @@ const CORS_HEADERS = {
 
 // ─── Agent name mapping ─────────────────────────────────────────
 const AGENT_NAMES: Record<string, string> = {
+  // ─── Jake: 탐색 ───
   'explore': 'Jake', 'explore-medium': 'Jake',
-  'oracle': 'David', 'oracle-medium': 'David', 'oracle-low': 'Danny',
-  'sisyphus-junior': 'Kevin', 'sisyphus-junior-low': 'Ken', 'sisyphus-junior-high': 'Karl',
+  'oh-my-claudecode:explore': 'Jake', 'oh-my-claudecode:explore-medium': 'Jake',
+  // ─── David: 아키텍트/자문 ───
+  'oracle': 'David', 'oracle-medium': 'David', 'oracle-low': 'David',
+  'oh-my-claudecode:architect': 'David',
+  // ─── Kevin: 실행 ───
+  'sisyphus-junior': 'Kevin', 'sisyphus-junior-low': 'Kevin', 'sisyphus-junior-high': 'Kevin',
+  'oh-my-claudecode:executor': 'Kevin', 'oh-my-claudecode:executor-low': 'Kevin', 'oh-my-claudecode:executor-high': 'Kevin',
+  'oh-my-claudecode:deep-executor': 'Kevin', 'general-purpose': 'Kevin',
+  // ─── Sophie: 디자인/프론트 ───
   'frontend-engineer': 'Sophie', 'frontend-engineer-low': 'Sophie', 'frontend-engineer-high': 'Sophie',
-  'document-writer': 'Emily',
-  'librarian': 'Michael', 'librarian-low': 'Michael',
-  'prometheus': 'Alex',
-  'momus': 'Rachel',
-  'metis': 'Tom',
-  'multimodal-looker': 'Luna',
-  'qa-tester': 'Sam',
-  // oh-my-claudecode prefixed agents
-  'oh-my-claudecode:explore': 'Jake',
-  'oh-my-claudecode:executor': 'Kevin', 'oh-my-claudecode:deep-executor': 'Kevin',
-  'oh-my-claudecode:architect': 'David', 'oh-my-claudecode:debugger': 'David',
-  'oh-my-claudecode:code-reviewer': 'David', 'oh-my-claudecode:quality-reviewer': 'David',
   'oh-my-claudecode:designer': 'Sophie',
-  'oh-my-claudecode:writer': 'Emily',
-  'oh-my-claudecode:scientist': 'Michael',
-  'oh-my-claudecode:planner': 'Alex', 'oh-my-claudecode:analyst': 'Alex',
-  'oh-my-claudecode:qa-tester': 'Sam', 'oh-my-claudecode:test-engineer': 'Sam',
-  'oh-my-claudecode:build-fixer': 'Kevin', 'oh-my-claudecode:code-simplifier': 'Kevin',
-  'oh-my-claudecode:security-reviewer': 'David',
-  'oh-my-claudecode:git-master': 'Kevin',
-  'oh-my-claudecode:verifier': 'Sam',
-  'oh-my-claudecode:critic': 'David',
-  'oh-my-claudecode:document-specialist': 'Emily',
-  // dialogue/utility agents
-  'dialogue-generator': 'Emily',
-  // guide/research/misc agents
-  'claude-code-guide': 'Michael',
-  'general-purpose': 'Kevin',
-  'Plan': 'Alex', 'plan': 'Alex',
-  // oh-my-claudecode tiered variants
-  'oh-my-claudecode:executor-low': 'Kevin', 'oh-my-claudecode:executor-high': 'Kevin',
-  'oh-my-claudecode:explore-medium': 'Jake',
+  // ─── Emily: 문서 ───
+  'document-writer': 'Emily', 'dialogue-generator': 'Emily',
+  'oh-my-claudecode:writer': 'Emily', 'oh-my-claudecode:document-specialist': 'Emily',
+  // ─── Michael: 리서치 ───
+  'librarian': 'Michael', 'librarian-low': 'Michael',
+  'claude-code-guide': 'Michael', 'multimodal-looker': 'Michael',
+  // ─── Alex: 기획 ───
+  'prometheus': 'Alex', 'Plan': 'Alex', 'plan': 'Alex',
+  'oh-my-claudecode:planner': 'Alex',
+  // ─── Sam: QA ───
+  'qa-tester': 'Sam', 'oh-my-claudecode:qa-tester': 'Sam',
+  // ─── Ethan: 코드 리뷰 ───
+  'oh-my-claudecode:code-reviewer': 'Ethan', 'oh-my-claudecode:quality-reviewer': 'Ethan',
+  // ─── Rachel: 비평 ───
+  'momus': 'Rachel', 'oh-my-claudecode:critic': 'Rachel',
+  // ─── Leo: 디버깅 ───
+  'oh-my-claudecode:debugger': 'Leo',
+  // ─── Daniel: 분석/연구 ───
+  'metis': 'Daniel', 'oh-my-claudecode:scientist': 'Daniel', 'oh-my-claudecode:analyst': 'Daniel',
+  // ─── Max: 빌드/정리 ───
+  'oh-my-claudecode:build-fixer': 'Max', 'oh-my-claudecode:code-simplifier': 'Max',
+  // ─── Tyler: 테스트/검증 ───
+  'oh-my-claudecode:test-engineer': 'Tyler', 'oh-my-claudecode:verifier': 'Tyler',
+  // ─── Ryan: 보안 ───
+  'oh-my-claudecode:security-reviewer': 'Ryan',
+  // ─── Eric: Git ───
+  'oh-my-claudecode:git-master': 'Eric',
 };
 
 // Reverse mapping: name → primary role
@@ -88,6 +92,9 @@ const NAME_TO_ROLE: Record<string, string> = {
   'Jake': 'explore', 'David': 'oracle', 'Kevin': 'sisyphus-junior',
   'Sophie': 'frontend-engineer', 'Emily': 'document-writer',
   'Michael': 'librarian', 'Alex': 'prometheus', 'Sam': 'qa-tester',
+  'Ethan': 'code-reviewer', 'Rachel': 'critic', 'Leo': 'debugger',
+  'Daniel': 'scientist', 'Max': 'build-fixer', 'Tyler': 'test-engineer',
+  'Ryan': 'security-reviewer', 'Eric': 'git-master',
 };
 
 const AGENT_PERSONALITIES: Record<string, string> = {
@@ -99,6 +106,14 @@ const AGENT_PERSONALITIES: Record<string, string> = {
   'Michael': '조용, 박학다식, 말수 적음',
   'Alex': '전략적 사고, 큰 그림 좋아함',
   'Sam': '꼼꼼, 버그 찾으면 기뻐함, 장난기',
+  'Ethan': '3년차, 꼼꼼한 리뷰어, 날카로운 눈',
+  'Rachel': '독설가지만 실력 인정, 팩폭',
+  'Leo': '끈기 있는 디버거, 집요함',
+  'Daniel': '데이터 덕후, 분석 좋아함, 조용',
+  'Max': '빌드 장인, 에러 보면 흥분',
+  'Tyler': '테스트 광, 커버리지 집착',
+  'Ryan': '보안 전문가, 약간 편집증',
+  'Eric': 'Git 마스터, 히스토리 깔끔함 집착',
 };
 
 // Minimal tool info for fallback only

@@ -179,6 +179,7 @@ export function isPixelWalkable(px, py) {
 // Desk positions (pixel coords) — where agents SIT when working
 export const deskPositions = {
   'Chris':   { x: 9.5 * TILE_SIZE, y: 6.15 * TILE_SIZE },
+  // Bottom row (face UP — dir:3)
   'Jake':    { x: 2.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
   'Emily':   { x: 3.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
   'David':   { x: 5.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
@@ -187,6 +188,15 @@ export const deskPositions = {
   'Alex':    { x: 13.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
   'Sophie':  { x: 15.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
   'Sam':     { x: 16.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
+  // Top row (face DOWN — dir:0)
+  'Ethan':   { x: 2.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
+  'Rachel':  { x: 3.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
+  'Leo':     { x: 5.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
+  'Daniel':  { x: 6.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
+  'Max':     { x: 12.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
+  'Tyler':   { x: 13.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
+  'Ryan':    { x: 15.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
+  'Eric':    { x: 16.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
 };
 
 // Break room positions (pixel coords) — where agents IDLE when not working
@@ -199,6 +209,14 @@ export const breakPositions = {
   'Alex':    { x: 26 * TILE_SIZE,   y: 9 * TILE_SIZE },
   'Sophie':  { x: 21.5 * TILE_SIZE, y: 12 * TILE_SIZE },
   'Sam':     { x: 25 * TILE_SIZE,   y: 6 * TILE_SIZE },
+  'Ethan':   { x: 23.5 * TILE_SIZE, y: 3 * TILE_SIZE },
+  'Rachel':  { x: 27 * TILE_SIZE,   y: 7 * TILE_SIZE },
+  'Leo':     { x: 24 * TILE_SIZE,   y: 5 * TILE_SIZE },
+  'Daniel':  { x: 22 * TILE_SIZE,   y: 9 * TILE_SIZE },
+  'Max':     { x: 23 * TILE_SIZE,   y: 11 * TILE_SIZE },
+  'Tyler':   { x: 26 * TILE_SIZE,   y: 11 * TILE_SIZE },
+  'Ryan':    { x: 24.5 * TILE_SIZE, y: 7 * TILE_SIZE },
+  'Eric':    { x: 27.5 * TILE_SIZE, y: 10 * TILE_SIZE },
 };
 
 // Break room wander zones — agents wander here when idle

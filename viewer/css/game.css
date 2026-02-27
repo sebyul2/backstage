@@ -183,6 +183,14 @@ html, body {
 .speaker-Michael { color: #6EE7B7 !important; }
 .speaker-Alex    { color: #93C5FD !important; }
 .speaker-Sam     { color: #FCA5A5 !important; }
+.speaker-Ethan   { color: #7DD3FC !important; }
+.speaker-Rachel  { color: #E879F9 !important; }
+.speaker-Leo     { color: #FDBA74 !important; }
+.speaker-Daniel  { color: #86EFAC !important; }
+.speaker-Max     { color: #FDE68A !important; }
+.speaker-Tyler   { color: #C4B5FD !important; }
+.speaker-Ryan    { color: #F87171 !important; }
+.speaker-Eric    { color: #67E8F9 !important; }
 
 @keyframes msg-in {
   from { opacity: 0; transform: translateY(3px); }

@@ -50,6 +50,7 @@ export class Character {
     const desk = deskPositions[name];
     this.homeX = desk ? desk.x : x;
     this.homeY = desk ? desk.y : y;
+    this.deskDir = desk?.dir ?? DIR.UP; // face direction when sitting at desk
 
     // Break room position (where they idle)
     const brk = breakPositions[name];
@@ -156,7 +157,7 @@ export class Character {
 
     const arriveAtDesk = () => {
       this.state = S.WORKING;
-      this.dir = DIR.UP; // face monitor
+      this.dir = this.deskDir ?? DIR.UP; // face monitor
       this.stateTimer = 0;
     };
 
@@ -193,7 +194,7 @@ export class Character {
     this.targetX = this.homeX;
     this.targetY = this.homeY;
     this.state = S.WORKING;
-    this.dir = DIR.UP;
+    this.dir = this.deskDir ?? DIR.UP;
     this.stateTimer = 0;
     this.talkCallback = null;
   }
@@ -477,9 +478,14 @@ export class CharacterManager {
 
     // Agents — start in break room
     const agents = [
+      // Bottom row (face UP)
       ['Jake', 'explore'], ['David', 'oracle'], ['Kevin', 'sisyphus-junior'],
       ['Sophie', 'frontend-engineer'], ['Emily', 'document-writer'],
       ['Michael', 'librarian'], ['Alex', 'prometheus'], ['Sam', 'qa-tester'],
+      // Top row (face DOWN)
+      ['Ethan', 'code-reviewer'], ['Rachel', 'critic'], ['Leo', 'debugger'],
+      ['Daniel', 'scientist'], ['Max', 'build-fixer'], ['Tyler', 'test-engineer'],
+      ['Ryan', 'security-reviewer'], ['Eric', 'git-master'],
     ];
 
     for (const [name, role] of agents) {

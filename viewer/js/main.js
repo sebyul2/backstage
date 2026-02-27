@@ -99,13 +99,23 @@ function updatePlayer(dt) {
 // ─── Name/role mapping ──────────────────────────────────────────
 const ROLE_TO_NAME = {
   'explore': 'Jake', 'explore-medium': 'Jake',
-  'oracle': 'David', 'oracle-medium': 'David', 'oracle-low': 'David',
+  'oracle': 'David', 'oracle-medium': 'David', 'oracle-low': 'David', 'architect': 'David',
   'sisyphus-junior': 'Kevin', 'sisyphus-junior-low': 'Kevin', 'sisyphus-junior-high': 'Kevin',
+  'executor': 'Kevin',
   'frontend-engineer': 'Sophie', 'frontend-engineer-low': 'Sophie', 'frontend-engineer-high': 'Sophie',
-  'document-writer': 'Emily',
+  'designer': 'Sophie',
+  'document-writer': 'Emily', 'writer': 'Emily',
   'librarian': 'Michael', 'librarian-low': 'Michael',
-  'prometheus': 'Alex',
+  'prometheus': 'Alex', 'planner': 'Alex',
   'qa-tester': 'Sam',
+  'code-reviewer': 'Ethan', 'quality-reviewer': 'Ethan',
+  'critic': 'Rachel', 'momus': 'Rachel',
+  'debugger': 'Leo',
+  'scientist': 'Daniel', 'analyst': 'Daniel', 'metis': 'Daniel',
+  'build-fixer': 'Max', 'code-simplifier': 'Max',
+  'test-engineer': 'Tyler', 'verifier': 'Tyler',
+  'security-reviewer': 'Ryan',
+  'git-master': 'Eric',
   'boss': 'Chris',
 };
 
