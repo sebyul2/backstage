@@ -12,7 +12,7 @@ Start/stop the backstage pixel art office viewer server.
 
 ## Implementation
 
-When this skill is invoked, follow these steps:
+When this skill is invoked, execute the **single Bash command** below. Do NOT run multiple commands or add extra checks.
 
 ### 1. Parse Arguments
 
@@ -20,59 +20,36 @@ Check if the user passed `on`, `off`, or nothing.
 
 ### 2. If no argument — show status and ask
 
-Check current status:
+Run this single command:
 ```bash
-PLUGIN_DIR="$HOME/.claude/plugins/backstage"
-if [ -f "$PLUGIN_DIR/enabled" ]; then
-  echo "Backstage is currently: ON"
-else
-  echo "Backstage is currently: OFF"
-fi
+[ -f ~/.claude/plugins/backstage/enabled ] && echo "Backstage: ON" || echo "Backstage: OFF"
 ```
 
 Then use AskUserQuestion to ask: "Backstage를 켜시겠습니까? / 끄시겠습니까?" with options.
 
 ### 3. Turn ON
 
+Run this **single Bash command** (copy exactly, do not modify):
 ```bash
-PLUGIN_DIR="$HOME/.claude/plugins/backstage"
-mkdir -p "$PLUGIN_DIR"
-touch "$PLUGIN_DIR/enabled"
-
-# Start viewer server if not already running
-if ! curl -s http://localhost:7777/ > /dev/null 2>&1; then
-  VIEWER_DIR="${CLAUDE_PLUGIN_ROOT}/viewer"
-  if [ ! -d "$VIEWER_DIR" ]; then
-    VIEWER_DIR="$PLUGIN_DIR/viewer"
-  fi
-  cd "$VIEWER_DIR" && nohup perl -e 'use POSIX "setsid"; setsid(); exec @ARGV' bun server.ts > /tmp/backstage-viewer.log 2>&1 &
-  echo $! > "$PLUGIN_DIR/viewer.pid"
-fi
+mkdir -p ~/.claude/plugins/backstage && touch ~/.claude/plugins/backstage/enabled && lsof -ti:7777 | xargs kill 2>/dev/null; sleep 0.3; VIEWER_DIR="${CLAUDE_PLUGIN_ROOT}/viewer"; [ ! -d "$VIEWER_DIR" ] && VIEWER_DIR=~/.claude/plugins/backstage/viewer; cd "$VIEWER_DIR" && nohup perl -e 'use POSIX "setsid"; setsid(); exec @ARGV' bun server.ts > /tmp/backstage-viewer.log 2>&1 & echo $! > ~/.claude/plugins/backstage/viewer.pid; sleep 1; lsof -ti:7777 > /dev/null 2>&1 && echo "OK: http://localhost:7777" || echo "FAIL: check /tmp/backstage-viewer.log"
 ```
 
-Report: "Backstage ON. Viewer: http://localhost:7777"
+Report the output. Do not add extra commands.
 
 ### 4. Turn OFF
 
+Run this **single Bash command** (copy exactly, do not modify):
 ```bash
-PLUGIN_DIR="$HOME/.claude/plugins/backstage"
-rm -f "$PLUGIN_DIR/enabled"
-
-# Stop viewer server
-PID=$(cat "$PLUGIN_DIR/viewer.pid" 2>/dev/null)
-if [ -n "$PID" ]; then
-  kill "$PID" 2>/dev/null
-fi
-rm -f "$PLUGIN_DIR/viewer.pid"
-
-# Also kill by port
-lsof -ti:7777 | xargs kill 2>/dev/null
+rm -f ~/.claude/plugins/backstage/enabled; lsof -ti:7777 | xargs kill 2>/dev/null; rm -f ~/.claude/plugins/backstage/viewer.pid; echo "Backstage OFF"
 ```
 
-Report: "Backstage OFF. Viewer stopped."
+Report the output. Do not add extra commands.
 
 ## Notes
 
 - When OFF, all hooks immediately exit (no token cost)
 - dialogue-generator is not called when OFF
 - The enabled file at `~/.claude/plugins/backstage/enabled` controls all hook behavior
+- ON always kills existing server first, then starts fresh (no stale process issues)
+- Uses `perl POSIX::setsid()` to detach from parent shell process group (prevents SIGTERM on Bash exit)
+- Liveness check uses `lsof -ti:7777` (port check), not `curl` (avoids false positives)
