@@ -72,7 +72,7 @@ export const furniture = [
   { type: 'desk', x: 12, y: 2, w: 2, h: 2 },
   { type: 'desk', x: 15, y: 2, w: 2, h: 2 },
 
-  // Monitors on desks
+  // Monitors — bottom row (top edge of desk, facing bottom-row agents)
   { type: 'monitor', x: 2.3, y: 2.1, w: 0.6, h: 0.5 },
   { type: 'monitor', x: 3.3, y: 2.1, w: 0.6, h: 0.5 },
   { type: 'monitor', x: 5.3, y: 2.1, w: 0.6, h: 0.5 },
@@ -82,7 +82,17 @@ export const furniture = [
   { type: 'monitor', x: 15.3, y: 2.1, w: 0.6, h: 0.5 },
   { type: 'monitor', x: 16.3, y: 2.1, w: 0.6, h: 0.5 },
 
-  // Chairs (in front of desks)
+  // Monitors — top row (bottom edge of desk, facing top-row agents)
+  { type: 'monitor', x: 2.3, y: 3.5, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 3.3, y: 3.5, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 5.3, y: 3.5, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 6.3, y: 3.5, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 12.3, y: 3.5, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 13.3, y: 3.5, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 15.3, y: 3.5, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 16.3, y: 3.5, w: 0.6, h: 0.5 },
+
+  // Chairs — bottom row (below desks, face UP)
   { type: 'chair', x: 2.3, y: 3.8, w: 0.7, h: 0.7 },
   { type: 'chair', x: 3.3, y: 3.8, w: 0.7, h: 0.7 },
   { type: 'chair', x: 5.3, y: 3.8, w: 0.7, h: 0.7 },
@@ -91,6 +101,16 @@ export const furniture = [
   { type: 'chair', x: 13.3, y: 3.8, w: 0.7, h: 0.7 },
   { type: 'chair', x: 15.3, y: 3.8, w: 0.7, h: 0.7 },
   { type: 'chair', x: 16.3, y: 3.8, w: 0.7, h: 0.7 },
+
+  // Chairs — top row (above desks, face DOWN)
+  { type: 'chair', x: 2.3, y: 1.3, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 3.3, y: 1.3, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 5.3, y: 1.3, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 6.3, y: 1.3, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 12.3, y: 1.3, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 13.3, y: 1.3, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 15.3, y: 1.3, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 16.3, y: 1.3, w: 0.7, h: 0.7 },
 
   // Plants (office)
   { type: 'plant', x: 4, y: 6, w: 1, h: 1 },

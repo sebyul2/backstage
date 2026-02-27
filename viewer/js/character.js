@@ -537,14 +537,24 @@ export class CharacterManager {
       if (char.role === role) return char;
     }
     const nameMap = {
+      // Bottom row
       'explore': 'Jake', 'explore-medium': 'Jake',
-      'oracle': 'David', 'oracle-medium': 'David',
+      'oracle': 'David', 'oracle-medium': 'David', 'oracle-low': 'David',
       'sisyphus-junior': 'Kevin', 'sisyphus-junior-low': 'Kevin', 'sisyphus-junior-high': 'Kevin',
       'frontend-engineer': 'Sophie', 'frontend-engineer-low': 'Sophie', 'frontend-engineer-high': 'Sophie',
       'document-writer': 'Emily',
       'librarian': 'Michael', 'librarian-low': 'Michael',
       'prometheus': 'Alex',
       'qa-tester': 'Sam',
+      // Top row
+      'code-reviewer': 'Ethan', 'quality-reviewer': 'Ethan',
+      'critic': 'Rachel', 'analyst': 'Rachel',
+      'debugger': 'Leo',
+      'scientist': 'Daniel',
+      'build-fixer': 'Max',
+      'test-engineer': 'Tyler',
+      'security-reviewer': 'Ryan',
+      'git-master': 'Eric',
     };
     const name = nameMap[role];
     if (name) return this.characters.get(name);
