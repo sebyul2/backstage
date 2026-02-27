@@ -22,10 +22,10 @@ if [ -f "$PID_FILE" ]; then
     fi
 fi
 
-# Bun 서버 백그라운드 시작 (nohup + bun 직접 실행)
-BACKSTAGE_PORT="$PORT" nohup bun "$SERVER_FILE" > /tmp/backstage-viewer.log 2>&1 &
+# Bun 서버를 새 세션으로 시작 (부모 셸 프로세스 그룹에서 분리 → SIGTERM 전파 차단)
+# macOS에 setsid가 없으므로 perl POSIX::setsid()로 대체
+BACKSTAGE_PORT="$PORT" nohup perl -e 'use POSIX "setsid"; setsid(); exec @ARGV' bun "$SERVER_FILE" > /tmp/backstage-viewer.log 2>&1 &
 SERVER_PID=$!
-disown $SERVER_PID 2>/dev/null
 echo "$SERVER_PID" > "$PID_FILE"
 
 # 서버 시작 대기

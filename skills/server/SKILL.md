@@ -45,9 +45,8 @@ if ! curl -s http://localhost:7777/ > /dev/null 2>&1; then
   if [ ! -d "$VIEWER_DIR" ]; then
     VIEWER_DIR="$PLUGIN_DIR/viewer"
   fi
-  cd "$VIEWER_DIR" && nohup bun server.ts > /tmp/backstage-viewer.log 2>&1 &
+  cd "$VIEWER_DIR" && nohup perl -e 'use POSIX "setsid"; setsid(); exec @ARGV' bun server.ts > /tmp/backstage-viewer.log 2>&1 &
   echo $! > "$PLUGIN_DIR/viewer.pid"
-  disown $! 2>/dev/null
 fi
 ```
 
