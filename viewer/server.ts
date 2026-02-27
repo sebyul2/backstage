@@ -1,32 +1,9 @@
 import { homedir } from "os";
 import * as path from "path";
 import * as fs from "fs";
-import { spawn } from "child_process";
 import Anthropic from '@anthropic-ai/sdk';
 
 const PLUGIN_DIR = path.join(homedir(), ".claude/plugins/backstage");
-
-// ─── Self-daemonize: fork detached child via setsid and exit ─
-// Uses perl POSIX::setsid() to create a new session — fully detaches
-// from parent shell's process group (prevents SIGTERM on shell exit)
-if (!process.env.BACKSTAGE_DAEMON) {
-  const logFd = fs.openSync("/tmp/backstage-viewer.log", "a");
-  // Do NOT use detached:true — it makes the child a process group leader,
-  // which causes perl's setsid() to fail (POSIX: PGID==PID can't setsid)
-  const child = spawn("perl", [
-    "-e", 'use POSIX "setsid"; setsid(); exec @ARGV',
-    process.execPath, import.meta.path,
-  ], {
-    env: { ...process.env, BACKSTAGE_DAEMON: "1" },
-    stdio: ["ignore", logFd, logFd],
-  });
-  child.unref();
-  const pidFile = path.join(PLUGIN_DIR, "viewer.pid");
-  fs.mkdirSync(PLUGIN_DIR, { recursive: true });
-  fs.writeFileSync(pidFile, String(child.pid));
-  console.log(`Backstage daemon started (PID: ${child.pid})`);
-  process.exit(0);
-}
 const HISTORY_FILE =
   process.env.BACKSTAGE_HISTORY ||
   path.join(PLUGIN_DIR, "history.jsonl");
@@ -1029,7 +1006,7 @@ const server = Bun.serve({
   },
 });
 
-console.log(`Backstage viewer running at http://localhost:${PORT}`);
+console.log(`[${new Date().toISOString()}] Backstage viewer running at http://localhost:${PORT} (PID: ${process.pid}, PGID: ${process.getgid?.() ?? '?'}, PPID: ${process.ppid ?? '?'})`);
 
 // Write own PID for reliable process management (launch.sh PID may differ)
 const PID_FILE = path.join(PLUGIN_DIR, "viewer.pid");
@@ -1075,5 +1052,6 @@ function shutdown(): void {
   process.exit(0);
 }
 
-process.on("SIGTERM", () => { console.log("Received SIGTERM"); shutdown(); });
-process.on("SIGINT", () => { console.log("Received SIGINT"); shutdown(); });
+process.on("SIGTERM", () => { console.log(`[${new Date().toISOString()}] Received SIGTERM`); shutdown(); });
+process.on("SIGINT", () => { console.log(`[${new Date().toISOString()}] Received SIGINT`); shutdown(); });
+process.on("SIGHUP", () => { console.log(`[${new Date().toISOString()}] Received SIGHUP (ignored)`); });

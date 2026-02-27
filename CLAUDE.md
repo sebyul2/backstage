@@ -9,11 +9,12 @@
 **Start:**
 ```bash
 mkdir -p ~/.claude/plugins/backstage && touch ~/.claude/plugins/backstage/enabled
-# viewer 서버 시작 (최신 버전 자동 탐색, self-daemonize)
+# viewer 서버 시작 (최신 버전 자동 탐색, nohup+setsid 데몬화)
 if ! lsof -ti:7777 > /dev/null 2>&1; then
   VIEWER_DIR="$(ls -d ~/.claude/plugins/cache/backstage/claude-backstage/*/viewer 2>/dev/null | sort -V | tail -1)"
   [ -z "$VIEWER_DIR" ] && VIEWER_DIR=~/.claude/plugins/backstage/viewer
-  cd "$VIEWER_DIR" && bun server.ts
+  cd "$VIEWER_DIR" && nohup perl -e 'use POSIX "setsid"; setsid(); exec @ARGV' bun server.ts > /tmp/backstage-viewer.log 2>&1 &
+  echo $! > ~/.claude/plugins/backstage/viewer.pid
 fi
 ```
 
