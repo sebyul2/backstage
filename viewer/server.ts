@@ -1054,4 +1054,11 @@ function shutdown(): void {
 
 process.on("SIGINT", shutdown);
 process.on("SIGHUP", () => {}); // Ignore SIGHUP — keep running when terminal closes
-process.on("SIGTERM", () => {}); // Ignore SIGTERM — parent shell exit sends this; stop via SIGKILL or auto-shutdown
+
+// Grace period: ignore SIGTERM for 5s after start (parent shell exit sends it immediately)
+// After that, SIGTERM triggers normal shutdown so `kill PID` works
+let ignoreTermUntil = Date.now() + 5000;
+process.on("SIGTERM", () => {
+  if (Date.now() < ignoreTermUntil) return; // ignore early SIGTERM from parent shell
+  shutdown();
+});
