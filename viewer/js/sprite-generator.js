@@ -82,6 +82,14 @@ const CHARACTER_CONFIGS = {
   'Michael': { hair: C.BROWN,   shirt: C.DARK_GREEN, hairStyle: 'curly',  skin: C.PEACH, glasses: true },
   'Alex':    { hair: C.DARK_BLUE, shirt: C.BLUE,  hairStyle: 'slick',     skin: C.PEACH },
   'Sam':     { hair: C.RED,     shirt: C.RED,     hairStyle: 'short-r',   skin: C.PEACH },
+  'Ethan':   { hair: C.DARK_BLUE, shirt: C.ORANGE,  hairStyle: 'spiky',     skin: C.PEACH },
+  'Rachel':  { hair: C.BROWN,   shirt: C.LAVENDER, hairStyle: 'ponytail',  skin: C.PEACH },
+  'Leo':     { hair: C.YELLOW,  shirt: C.DARK_GREEN, hairStyle: 'neat',    skin: C.PEACH },
+  'Daniel':  { hair: C.BROWN,   shirt: C.BLUE,    hairStyle: 'curly',     skin: C.PEACH, glasses: true },
+  'Max':     { hair: C.GREEN,   shirt: C.WHITE,   hairStyle: 'cap',       skin: C.PEACH },
+  'Tyler':   { hair: C.RED,     shirt: C.GREEN,   hairStyle: 'slick',     skin: C.PEACH },
+  'Ryan':    { hair: C.PINK,    shirt: C.DARK_GREEN, hairStyle: 'short',  skin: C.PEACH },
+  'Eric':    { hair: C.DARK_BLUE, shirt: C.RED,    hairStyle: 'bob',       skin: C.PEACH },
 };
 
 // ─── Low-level drawing helpers ───

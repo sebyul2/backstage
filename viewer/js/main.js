@@ -1,11 +1,11 @@
 // main.js — Entry point: SSE, keyboard, player character, event dispatch
 // v2.1: agent lifecycle, speaker fix, no chat input, no welcome
 
-import { GameEngine } from './engine.js?v=2.5';
-import { Character, CharacterManager } from './character.js?v=2.5';
-import { BubbleManager } from './bubble.js?v=2.5';
-import { Renderer } from './renderer.js?v=2.5';
-import { MAP_W, MAP_H, TILE_SIZE, deskPositions, playerSpawn, isPixelWalkable } from './map.js?v=2.5';
+import { GameEngine } from './engine.js?v=2.4.1';
+import { Character, CharacterManager } from './character.js?v=2.4.1';
+import { BubbleManager } from './bubble.js?v=2.4.1';
+import { Renderer } from './renderer.js?v=2.4.1';
+import { MAP_W, MAP_H, TILE_SIZE, deskPositions, playerSpawn, isPixelWalkable } from './map.js?v=2.4.1';
 
 // ─── Globals ─────────────────────────────────────────────────────
 let engine, characters, bubbles, renderer;

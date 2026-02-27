@@ -1,9 +1,9 @@
 // character.js — Character class: position, state machine, animation, movement
 // v2.1: break room lifecycle, no random office wandering
 
-import { TILE_SIZE, deskPositions, breakPositions, breakWanderZones, MAP_W, MAP_H } from './map.js?v=2.5';
-import { findPath, pixelToTile, tileToPixel } from './pathfinding.js?v=2.5';
-import { generateSpriteSheet } from './sprite-generator.js?v=2.5';
+import { TILE_SIZE, deskPositions, breakPositions, breakWanderZones, MAP_W, MAP_H } from './map.js?v=2.4.1';
+import { findPath, pixelToTile, tileToPixel } from './pathfinding.js?v=2.4.1';
+import { generateSpriteSheet } from './sprite-generator.js?v=2.4.1';
 
 // States
 const S = {
