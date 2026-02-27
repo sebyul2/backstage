@@ -11,13 +11,14 @@ const PLUGIN_DIR = path.join(homedir(), ".claude/plugins/backstage");
 // from parent shell's process group (prevents SIGTERM on shell exit)
 if (!process.env.BACKSTAGE_DAEMON) {
   const logFd = fs.openSync("/tmp/backstage-viewer.log", "a");
+  // Do NOT use detached:true — it makes the child a process group leader,
+  // which causes perl's setsid() to fail (POSIX: PGID==PID can't setsid)
   const child = spawn("perl", [
     "-e", 'use POSIX "setsid"; setsid(); exec @ARGV',
     process.execPath, import.meta.path,
   ], {
     env: { ...process.env, BACKSTAGE_DAEMON: "1" },
     stdio: ["ignore", logFd, logFd],
-    detached: true,
   });
   child.unref();
   const pidFile = path.join(PLUGIN_DIR, "viewer.pid");
