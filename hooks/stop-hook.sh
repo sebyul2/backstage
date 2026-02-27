@@ -1,16 +1,9 @@
 #!/bin/bash
-# Stop Hook - 세션 종료 시 viewer 서버 강제 종료
-
-# PID 파일로 시도
-PID_FILE="$HOME/.claude/plugins/backstage/viewer.pid"
-if [ -f "$PID_FILE" ]; then
-    pid=$(cat "$PID_FILE")
-    kill "$pid" 2>/dev/null
-    rm -f "$PID_FILE"
-fi
-
-# 포트 기반으로 확실히 종료 (PID 파일 없이 띄운 경우 대비)
-lsof -ti:7777 | xargs kill -9 2>/dev/null
+# Stop Hook - 세션 종료 시 정리
+# NOTE: viewer 서버는 여기서 죽이지 않음!
+# - 서버는 10분 idle 시 auto-shutdown
+# - 수동 종료는 /server off
+# - Stop hook은 매 턴 종료마다 트리거되므로 서버를 죽이면 안됨
 
 echo '{"continue": true}'
 exit 0
