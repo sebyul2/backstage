@@ -6,12 +6,17 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const PLUGIN_DIR = path.join(homedir(), ".claude/plugins/backstage");
 
-// ─── Self-daemonize: fork detached child and exit ────────────
-// Standard Unix daemon pattern — works on any shell/terminal/environment
+// ─── Self-daemonize: fork detached child via setsid and exit ─
+// Uses perl POSIX::setsid() to create a new session — fully detaches
+// from parent shell's process group (prevents SIGTERM on shell exit)
 if (!process.env.BACKSTAGE_DAEMON) {
-  const child = spawn(process.execPath, [import.meta.path], {
+  const logFd = fs.openSync("/tmp/backstage-viewer.log", "a");
+  const child = spawn("perl", [
+    "-e", 'use POSIX "setsid"; setsid(); exec @ARGV',
+    process.execPath, import.meta.path,
+  ], {
     env: { ...process.env, BACKSTAGE_DAEMON: "1" },
-    stdio: ["ignore", fs.openSync("/tmp/backstage-viewer.log", "a"), fs.openSync("/tmp/backstage-viewer.log", "a")],
+    stdio: ["ignore", logFd, logFd],
     detached: true,
   });
   child.unref();
