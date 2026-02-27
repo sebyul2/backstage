@@ -69,22 +69,6 @@ const AGENT_NAMES: Record<string, string> = {
   'oh-my-claudecode:planner': 'Alex',
   // ─── Sam: QA ───
   'qa-tester': 'Sam', 'oh-my-claudecode:qa-tester': 'Sam',
-  // ─── Ethan: 코드 리뷰 ───
-  'oh-my-claudecode:code-reviewer': 'Ethan', 'oh-my-claudecode:quality-reviewer': 'Ethan',
-  // ─── Rachel: 비평 ───
-  'momus': 'Rachel', 'oh-my-claudecode:critic': 'Rachel',
-  // ─── Leo: 디버깅 ───
-  'oh-my-claudecode:debugger': 'Leo',
-  // ─── Daniel: 분석/연구 ───
-  'metis': 'Daniel', 'oh-my-claudecode:scientist': 'Daniel', 'oh-my-claudecode:analyst': 'Daniel',
-  // ─── Max: 빌드/정리 ───
-  'oh-my-claudecode:build-fixer': 'Max', 'oh-my-claudecode:code-simplifier': 'Max',
-  // ─── Tyler: 테스트/검증 ───
-  'oh-my-claudecode:test-engineer': 'Tyler', 'oh-my-claudecode:verifier': 'Tyler',
-  // ─── Ryan: 보안 ───
-  'oh-my-claudecode:security-reviewer': 'Ryan',
-  // ─── Eric: Git ───
-  'oh-my-claudecode:git-master': 'Eric',
 };
 
 // Reverse mapping: name → primary role
@@ -92,9 +76,6 @@ const NAME_TO_ROLE: Record<string, string> = {
   'Jake': 'explore', 'David': 'oracle', 'Kevin': 'sisyphus-junior',
   'Sophie': 'frontend-engineer', 'Emily': 'document-writer',
   'Michael': 'librarian', 'Alex': 'prometheus', 'Sam': 'qa-tester',
-  'Ethan': 'code-reviewer', 'Rachel': 'critic', 'Leo': 'debugger',
-  'Daniel': 'scientist', 'Max': 'build-fixer', 'Tyler': 'test-engineer',
-  'Ryan': 'security-reviewer', 'Eric': 'git-master',
 };
 
 const AGENT_PERSONALITIES: Record<string, string> = {
@@ -106,14 +87,6 @@ const AGENT_PERSONALITIES: Record<string, string> = {
   'Michael': '조용, 박학다식, 말수 적음',
   'Alex': '전략적 사고, 큰 그림 좋아함',
   'Sam': '꼼꼼, 버그 찾으면 기뻐함, 장난기',
-  'Ethan': '3년차, 꼼꼼한 리뷰어, 날카로운 눈',
-  'Rachel': '독설가지만 실력 인정, 팩폭',
-  'Leo': '끈기 있는 디버거, 집요함',
-  'Daniel': '데이터 덕후, 분석 좋아함, 조용',
-  'Max': '빌드 장인, 에러 보면 흥분',
-  'Tyler': '테스트 광, 커버리지 집착',
-  'Ryan': '보안 전문가, 약간 편집증',
-  'Eric': 'Git 마스터, 히스토리 깔끔함 집착',
 };
 
 // Minimal tool info for fallback only
@@ -310,6 +283,7 @@ const subagentOffsets = new Map<string, number>();
 const recordedToolIds = new Set<string>();
 let lastChrisTalkEpoch = 0;
 const recordedTextHashes = new Set<string>();
+const thinkQueue: string[] = [];
 
 // Track active agents for auto-completion detection
 const activeAgents: Map<string, { lastActivity: number; agentName: string; agentType: string }> = new Map();
@@ -628,6 +602,77 @@ function scanTranscriptForAgentWork(): void {
         if (lastChrisTalkEpoch === nowEpoch) break;
       } catch {}
     }
+  }
+
+  // Chris thinking (from model's thinking blocks → 💭 thought bubbles, chunked)
+  // Queue: extract all chunks from new thinking blocks, emit one per scan cycle
+  if (thinkQueue.length === 0 && nowEpoch - lastChrisTalkEpoch >= 6) {
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.type !== "assistant" || entry.message?.role !== "assistant") continue;
+        if (!entry.message?.content) continue;
+
+        for (const block of entry.message.content) {
+          if (block.type !== "thinking" || !block.thinking) continue;
+
+          const thinking: string = block.thinking.trim();
+          if (thinking.length < 30) continue;
+
+          const thinkHash = `think:${thinking.slice(0, 80)}`;
+          if (recordedTextHashes.has(thinkHash)) continue;
+          recordedTextHashes.add(thinkHash);
+
+          // Split into paragraphs (double newline or logical breaks)
+          const paragraphs = thinking.split(/\n{2,}/)
+            .map((p: string) => p.trim())
+            .filter((p: string) => p.length > 15);
+
+          for (const para of paragraphs) {
+            // Extract meaningful lines from each paragraph
+            const paraLines = para.split('\n')
+              .map((l: string) => l.trim())
+              .filter((l: string) => l.length > 10 && l.length < 200)
+              .filter((l: string) => !l.startsWith('<') && !l.startsWith('{') && !l.startsWith('```'))
+              .filter((l: string) => !l.startsWith('//') && !l.startsWith('*') && !l.startsWith('#'))
+              .filter((l: string) => !l.startsWith('|') && !l.startsWith('-'))
+              .filter((l: string) => !/^(import|const|let|var|function|class|if|for|return|export)\b/.test(l));
+
+            const korean = paraLines.filter((l: string) => /[\uAC00-\uD7AF]/.test(l));
+            const best = korean.length > 0 ? korean : paraLines;
+            if (best.length === 0) continue;
+
+            let msg = best.slice(0, 2).join(' ');
+            msg = msg.replace(/\*\*/g, '').replace(/`/g, '').replace(/^\s*>\s*/g, '');
+            if (msg.length > 120) msg = msg.slice(0, 117) + '...';
+            if (msg.length < 10) continue;
+
+            thinkQueue.push(msg);
+          }
+
+          // Cap at 8 chunks max per thinking block
+          if (thinkQueue.length > 8) {
+            thinkQueue.length = 8;
+          }
+        }
+        if (thinkQueue.length > 0) break;
+      } catch {}
+    }
+  }
+
+  // Emit one thinking chunk per scan cycle (every 3 seconds)
+  if (thinkQueue.length > 0) {
+    const msg = thinkQueue.shift()!;
+    lastChrisTalkEpoch = nowEpoch;
+
+    const ts = new Date().toTimeString().slice(0, 8);
+    const thinkEntry = JSON.stringify({
+      ts, epoch: nowEpoch, type: 'think',
+      speaker: 'Chris', role: 'boss',
+      msg: '💭 ' + msg,
+    });
+
+    try { fs.appendFileSync(HISTORY_FILE, thinkEntry + '\n'); } catch {}
   }
 
   // Prune
@@ -1012,6 +1057,113 @@ console.log(`[${new Date().toISOString()}] Backstage viewer running at http://lo
 const PID_FILE = path.join(PLUGIN_DIR, "viewer.pid");
 try { fs.writeFileSync(PID_FILE, String(process.pid)); } catch {}
 
+// ─── [C] Team Activation (Chris tool → [C] team member) ─────────
+
+const TOOL_TO_C_TEAM: Record<string, string> = {
+  'Read': 'Mia', 'Edit': 'Kai', 'Grep': 'Zoe',
+  'Glob': 'Liam', 'Write': 'Aria', 'Bash': 'Noah',
+  'Task': 'Luna',
+};
+const C_TEAM_FALLBACK = 'Owen';
+const C_TEAM_COOLDOWN_MS = 3_000;
+const C_TEAM_DURATION_MS = 8_000;
+
+interface CTeamActivation {
+  name: string;
+  tool: string;
+  expireAt: number;
+}
+
+const activeCTeam = new Map<string, CTeamActivation>();
+const cTeamLastActivate = new Map<string, number>();
+let cTeamHistoryOffset = 0;
+
+function checkAndActivateCTeam(): void {
+  if (!fs.existsSync(HISTORY_FILE)) return;
+  const now = Date.now();
+
+  // 1. Expire active [C] team members → write c-idle events
+  for (const [name, info] of activeCTeam) {
+    if (now >= info.expireAt) {
+      const ts = new Date().toTimeString().slice(0, 8);
+      const epoch = Math.floor(now / 1000);
+      const entry = JSON.stringify({
+        ts, epoch, type: 'c-idle',
+        speaker: name, msg: 'idle'
+      });
+      try { fs.appendFileSync(HISTORY_FILE, entry + '\n'); } catch {}
+      activeCTeam.delete(name);
+    }
+  }
+
+  // 2. Read recent history for Chris work events
+  try {
+    const stat = fs.statSync(HISTORY_FILE);
+    if (cTeamHistoryOffset === 0) cTeamHistoryOffset = Math.max(0, stat.size - 2048);
+    if (stat.size <= cTeamHistoryOffset) return;
+    if (stat.size < cTeamHistoryOffset) { cTeamHistoryOffset = 0; return; }
+
+    const readSize = Math.min(stat.size - cTeamHistoryOffset, 4096);
+    const buf = Buffer.alloc(readSize);
+    const fd = fs.openSync(HISTORY_FILE, 'r');
+    try {
+      fs.readSync(fd, buf, 0, readSize, cTeamHistoryOffset);
+    } finally { fs.closeSync(fd); }
+    cTeamHistoryOffset = stat.size;
+
+    const content = buf.toString('utf-8');
+    const lines = content.trim().split('\n');
+
+    // Find latest Chris work event
+    let chrisTool = '';
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const e = JSON.parse(lines[i]);
+        if (e.type === 'work' && e.speaker === 'Chris' && e.role === 'boss') {
+          const msg = e.msg || '';
+          if (msg.includes('📖') || msg.includes('확인 중')) chrisTool = 'Read';
+          else if (msg.includes('🔍') || msg.includes('찾는 중')) chrisTool = 'Glob';
+          else if (msg.includes('🔎') || msg.includes('검색 중')) chrisTool = 'Grep';
+          else if (msg.includes('✏️') || msg.includes('수정 중')) chrisTool = 'Edit';
+          else if (msg.includes('📝') || msg.includes('작성 중')) chrisTool = 'Write';
+          else if (msg.includes('💻') || msg.includes('실행 중')) chrisTool = 'Bash';
+          else chrisTool = 'Read';
+          break;
+        }
+      } catch {}
+    }
+
+    if (!chrisTool) return;
+
+    // 3. Map tool → [C] team member
+    const memberName = TOOL_TO_C_TEAM[chrisTool] || C_TEAM_FALLBACK;
+
+    // 4. Cooldown check (same member within 3s)
+    const lastActivate = cTeamLastActivate.get(memberName) || 0;
+    if (now - lastActivate < C_TEAM_COOLDOWN_MS) return;
+
+    // 5. Skip if already active
+    if (activeCTeam.has(memberName)) return;
+
+    // 6. Activate
+    activeCTeam.set(memberName, { name: memberName, tool: chrisTool, expireAt: now + C_TEAM_DURATION_MS });
+    cTeamLastActivate.set(memberName, now);
+
+    const info = TOOL_INFO[chrisTool] || { emoji: '🔧', verb: '작업 중' };
+    const ts = new Date().toTimeString().slice(0, 8);
+    const epoch = Math.floor(now / 1000);
+    const entry = JSON.stringify({
+      ts, epoch, type: 'c-active',
+      speaker: memberName,
+      tool: chrisTool,
+      duration: C_TEAM_DURATION_MS,
+      msg: `${info.emoji} ${chrisTool} ${info.verb}`
+    });
+
+    try { fs.appendFileSync(HISTORY_FILE, entry + '\n'); } catch {}
+  } catch {}
+}
+
 // ─── Timers ──────────────────────────────────────────────────────
 
 // Transcript scanner: every 3 seconds
@@ -1023,6 +1175,11 @@ const transcriptScanTimer = setInterval(() => {
 const idleChatTimer = setInterval(() => {
   try { generateIdleChat(); } catch {}
 }, 20_000);
+
+// [C] Team activation: every 3 seconds
+const cTeamTimer = setInterval(() => {
+  try { checkAndActivateCTeam(); } catch {}
+}, 3000);
 
 // ─── Auto-shutdown: no SSE listeners for 10 minutes ──────────
 let lastListenerTime = Date.now();
@@ -1043,6 +1200,7 @@ function shutdown(): void {
   console.log("\nShutting down...");
   clearInterval(transcriptScanTimer);
   clearInterval(idleChatTimer);
+  clearInterval(cTeamTimer);
   clearInterval(idleCheckTimer);
   for (const conn of activeConnections) {
     conn.close();

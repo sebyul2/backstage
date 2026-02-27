@@ -1,14 +1,16 @@
 // main.js — Entry point: SSE, keyboard, player character, event dispatch
 // v2.1: agent lifecycle, speaker fix, no chat input, no welcome
 
-import { GameEngine } from './engine.js?v=2.4.1';
-import { Character, CharacterManager } from './character.js?v=2.4.1';
-import { BubbleManager } from './bubble.js?v=2.4.1';
-import { Renderer } from './renderer.js?v=2.4.1';
-import { MAP_W, MAP_H, TILE_SIZE, deskPositions, playerSpawn, isPixelWalkable } from './map.js?v=2.4.1';
+import { GameEngine } from './engine.js?v=2.5';
+import { Character, CharacterManager } from './character.js?v=2.5';
+import { BubbleManager } from './bubble.js?v=2.5';
+import { Renderer } from './renderer.js?v=2.5';
+import { ParticleManager } from './particles.js?v=2.5';
+import { MAP_W, MAP_H, TILE_SIZE, MAP_COLS, MAP_ROWS, deskPositions, playerSpawn, isPixelWalkable, groundMap, furniture } from './map.js?v=2.5';
+import { PhysicsWorld } from './physics.js?v=2.5';
 
 // ─── Globals ─────────────────────────────────────────────────────
-let engine, characters, bubbles, renderer;
+let engine, characters, bubbles, renderer, particles, physics;
 let player = null;
 let eventSource = null;
 let reconnectTimer = null;
@@ -18,7 +20,10 @@ const MAX_RECONNECT = 5;
 
 // ─── Keyboard state ─────────────────────────────────────────────
 const keys = { up: false, down: false, left: false, right: false };
-const PLAYER_SPEED = 120;
+const PLAYER_SPEED = 180; // 1.5x speed
+
+let spaceJustPressed = false;
+let lastWhipTime = 0;
 
 document.addEventListener('keydown', (e) => {
   switch (e.key) {
@@ -26,6 +31,7 @@ document.addEventListener('keydown', (e) => {
     case 'ArrowDown':  case 's': case 'S': keys.down = true; e.preventDefault(); break;
     case 'ArrowLeft':  case 'a': case 'A': keys.left = true; e.preventDefault(); break;
     case 'ArrowRight': case 'd': case 'D': keys.right = true; e.preventDefault(); break;
+    case ' ': if (!e.repeat) spaceJustPressed = true; e.preventDefault(); break;
   }
 });
 
@@ -46,7 +52,7 @@ function createPlayer() {
   p.homeX = px;
   p.homeY = py;
   p.active = true;
-  p.dir = 3; // Face UP (toward boss desk)
+  p.dir = 0; // Face DOWN (overseeing office)
   return p;
 }
 
@@ -57,6 +63,12 @@ function updatePlayer(dt) {
   const dy = (keys.down ? 1 : 0) - (keys.up ? 1 : 0);
   const moving = dx !== 0 || dy !== 0;
 
+  // Sync position from physics
+  if (physics && physics.enabled) {
+    const pos = physics.getPosition('Player');
+    if (pos) { player.x = pos.x; player.y = pos.y; }
+  }
+
   player.frameTimer += dt * 1000;
   const animSpeed = moving ? 120 : 500;
   if (player.frameTimer >= animSpeed) {
@@ -66,12 +78,9 @@ function updatePlayer(dt) {
 
   if (!moving) {
     player.state = 'idle';
+    if (physics && physics.enabled) physics.setVelocity('Player', 0, 0);
     return;
   }
-
-  const len = Math.sqrt(dx * dx + dy * dy);
-  const mx = (dx / len) * PLAYER_SPEED * dt;
-  const my = (dy / len) * PLAYER_SPEED * dt;
 
   if (Math.abs(dx) > Math.abs(dy)) {
     player.dir = dx > 0 ? 2 : 1;
@@ -80,20 +89,104 @@ function updatePlayer(dt) {
   }
   player.state = 'walking';
 
-  const nx = player.x + mx;
-  const ny = player.y + my;
+  const len = Math.sqrt(dx * dx + dy * dy);
 
-  if (isPixelWalkable(nx, ny)) {
-    player.x = nx;
-    player.y = ny;
-  } else if (isPixelWalkable(nx, player.y)) {
-    player.x = nx;
-  } else if (isPixelWalkable(player.x, ny)) {
-    player.y = ny;
+  if (physics && physics.enabled) {
+    // Physics-based movement: set velocity, let engine handle collision
+    const v = PLAYER_SPEED / 60;
+    physics.setVelocity('Player', (dx / len) * v, (dy / len) * v);
+  } else {
+    // Fallback: grid-based collision
+    const mx = (dx / len) * PLAYER_SPEED * dt;
+    const my = (dy / len) * PLAYER_SPEED * dt;
+    const nx = player.x + mx;
+    const ny = player.y + my;
+    if (isPixelWalkable(nx, ny)) {
+      player.x = nx; player.y = ny;
+    } else if (isPixelWalkable(nx, player.y)) {
+      player.x = nx;
+    } else if (isPixelWalkable(player.x, ny)) {
+      player.y = ny;
+    }
   }
 
   player.x = Math.max(TILE_SIZE, Math.min(MAP_W - TILE_SIZE, player.x));
   player.y = Math.max(TILE_SIZE, Math.min(MAP_H - TILE_SIZE, player.y));
+}
+
+// ─── 채찍질 (Whip) ──────────────────────────────────────────────
+
+const WHIP_REACTIONS = [
+  '앗! 네 바로요!', '헉 알겠습니다!', 'ㅋㅋ 가요 가요',
+  '어 벌써요?', '넵넵!', '아이고...', '잠깐만요ㅠ',
+  '네?! 아 네!', '으악 놀랐잖아요', '가고 있었어요...',
+];
+
+function handleWhip() {
+  if (!spaceJustPressed) return;
+  spaceJustPressed = false;
+
+  const now = Date.now();
+  if (now - lastWhipTime < 800) return; // cooldown
+  lastWhipTime = now;
+
+  if (!player || !characters) return;
+
+  // Find nearest idle agent within 3 tiles
+  const range = TILE_SIZE * 3;
+  let nearest = null;
+  let nearestDist = Infinity;
+
+  // Target any non-working agent (not just idle in break room)
+  const whippable = [...characters.characters.values()].filter(c =>
+    c.name !== 'Chris' && c.name !== 'Player' && !c._isCTeam &&
+    c.state !== 'working' && c.state !== 'running_to_desk' && c.stunTimer <= 0
+  );
+  for (const char of whippable) {
+    const dx = char.x - player.x;
+    const dy = char.y - player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < range && dist < nearestDist) {
+      nearest = char;
+      nearestDist = dist;
+    }
+  }
+
+  if (nearest) {
+    // Whip hit! Visual: whip trail from hand + impact
+    if (particles) {
+      const hx = player.dir === 2 ? 14 : player.dir === 1 ? -14 : 0;
+      const hy = player.dir === 3 ? -8 : 8;
+      particles.spawnWhip(player.x + hx, player.y + hy, nearest.x, nearest.y);
+      particles.spawn(nearest.x, nearest.y - 20, '💥');
+    }
+    const reaction = WHIP_REACTIONS[Math.floor(Math.random() * WHIP_REACTIONS.length)];
+    bubbles.add(nearest.name, reaction, 'talk', 2000);
+
+    // Physics knockback: strong push toward wall
+    const kdx = nearest.x - player.x;
+    const kdy = nearest.y - player.y;
+    const kDist = Math.sqrt(kdx * kdx + kdy * kdy) || 1;
+    if (physics && physics.enabled) {
+      physics.setVelocity(nearest.name, (kdx / kDist) * 25, (kdy / kDist) * 25);
+    }
+    nearest.stunTimer = 600;
+
+    const agent = nearest;
+    setTimeout(() => {
+      agent.stunTimer = 0;
+      if (physics && physics.enabled) {
+        physics.setVelocity(agent.name, 0, 0);
+      }
+      // Return to original position (break room spot)
+      agent.walkTo(agent.breakX, agent.breakY);
+    }, 600);
+  } else {
+    // Whip miss: swing animation in facing direction
+    if (particles) {
+      particles.spawnWhipMiss(player.x, player.y, player.dir);
+    }
+  }
 }
 
 // ─── Name/role mapping ──────────────────────────────────────────
@@ -108,15 +201,11 @@ const ROLE_TO_NAME = {
   'librarian': 'Michael', 'librarian-low': 'Michael',
   'prometheus': 'Alex', 'planner': 'Alex',
   'qa-tester': 'Sam',
-  'code-reviewer': 'Ethan', 'quality-reviewer': 'Ethan',
-  'critic': 'Rachel', 'momus': 'Rachel',
-  'debugger': 'Leo',
-  'scientist': 'Daniel', 'analyst': 'Daniel', 'metis': 'Daniel',
-  'build-fixer': 'Max', 'code-simplifier': 'Max',
-  'test-engineer': 'Tyler', 'verifier': 'Tyler',
-  'security-reviewer': 'Ryan',
-  'git-master': 'Eric',
   'boss': 'Chris',
+  // [C] Team
+  'c-read': 'Mia', 'c-edit': 'Kai', 'c-grep': 'Zoe',
+  'c-glob': 'Liam', 'c-write': 'Aria', 'c-bash': 'Noah',
+  'c-task': 'Luna', 'c-other': 'Owen',
 };
 
 function resolveCharName(entry) {
@@ -155,9 +244,31 @@ function resolveAgentSpeaker(entry) {
 
 // ─── SSE Event → Game Action ────────────────────────────────────
 
+// Dedup: skip identical speaker+msg+type within 5 seconds
+const _recentEvents = new Map();
+
+function _isDuplicate(entry) {
+  if (!entry.msg) return false;
+  const key = `${entry.speaker || ''}:${entry.type || ''}:${entry.msg || ''}`;
+  const now = Date.now();
+  const last = _recentEvents.get(key);
+  if (last && (now - last) < 5000) return true;
+  _recentEvents.set(key, now);
+  // Prune old entries
+  if (_recentEvents.size > 200) {
+    for (const [k, v] of _recentEvents) {
+      if (now - v > 10000) _recentEvents.delete(k);
+    }
+  }
+  return false;
+}
+
 function handleSSEEvent(entry) {
   const type = entry.type;
   const lines = entry.lines;
+
+  // Skip duplicate events (hook + transcript scanner can both write same event)
+  if (_isDuplicate(entry)) return;
 
   addChatMessage(entry);
 
@@ -170,6 +281,10 @@ function handleSSEEvent(entry) {
     case 'update':
     case 'chat':       handleTalk(entry); break;
     case 'idle-chat':  handleIdleChat(entry); break;
+    case 'think':      handleTalk(entry); break;
+    case 'c-active':   handleCTeamActive(entry); break;
+    case 'c-idle':     handleCTeamIdle(entry); break;
+    case 'c-bubble':   handleCTeamBubble(entry); break;
     case 'user-input':
     case 'request':    handleUserInput(entry); break;
     default:           handleGeneric(entry); break;
@@ -186,7 +301,8 @@ function handleAssign(entry, lines) {
   if (lines && lines.length > 0) {
     showDialogueLines(lines, 'assign', entry);
   } else if (entry.msg) {
-    bubbles.add('Chris', entry.msg, 'assign');
+    const speaker = agentName || resolveCharName(entry) || 'Chris';
+    bubbles.add(speaker, entry.msg, 'assign');
   }
 
   if (agent) {
@@ -216,12 +332,28 @@ function handleDone(entry, lines) {
   }
 }
 
+// Tool → emoji for particles
+const TOOL_EMOJIS = {
+  'Read': '📖', 'Glob': '🔍', 'Grep': '🔎',
+  'Edit': '✏️', 'Write': '📝', 'Bash': '💻', 'Task': '📋',
+};
+
 function handleWork(entry) {
   const name = resolveCharName(entry);
   if (!name) return;
 
-  // Chris stays at his desk — don't move him
-  if (name === 'Chris') return;
+  // Chris: spawn particle at desk, don't move him
+  if (name === 'Chris') {
+    if (particles) {
+      const chris = characters.get('Chris');
+      if (chris) {
+        const tool = parseToolFromMsg(entry.msg);
+        const emoji = TOOL_EMOJIS[tool] || '⚡';
+        particles.spawn(chris.x, chris.y - 20, emoji);
+      }
+    }
+    return;
+  }
 
   const char = characters.get(name);
   if (char) {
@@ -264,6 +396,49 @@ function handleIdleChat(entry) {
 function handleUserInput(entry) {
   if (player && entry.msg) {
     bubbles.add('Player', entry.msg, 'request', 4000);
+  }
+}
+
+function handleCTeamActive(entry) {
+  const name = entry.speaker;
+  if (!name) return;
+  const char = characters.get(name);
+  if (!char || !char._isCTeam) return;
+
+  const tool = entry.tool || 'Read';
+  const duration = entry.duration || 8000;
+  char.activateTool(tool, duration);
+
+  // Show haiku-style bubble with tool context
+  const C_TEAM_HAIKU = {
+    Read: ['읽는다, 코드를...', '파일 속 진실을', '한 줄의 의미'],
+    Edit: ['고친다, 한 줄을', '코드의 외과의', '수정의 순간'],
+    Grep: ['찾는다, 패턴을', '코드 속 보물찾기', '검색의 항해'],
+    Glob: ['파일을 부른다', '이름의 미로 속', '경로를 따라서'],
+    Write: ['쓴다, 새 코드를', '빈 파일에 생명을', '창작의 순간'],
+    Bash: ['실행, 그리고...', '터미널이 답한다', '명령의 메아리'],
+    Task: ['위임한다, 일을', '함께라면 가능한', '팀의 힘으로'],
+  };
+  const lines = C_TEAM_HAIKU[tool] || ['작업 중...'];
+  const line = lines[Math.floor(Math.random() * lines.length)];
+  bubbles.add(name, line, 'work', 3500);
+}
+
+function handleCTeamBubble(entry) {
+  const name = entry.speaker;
+  if (!name || !entry.msg) return;
+  const char = characters.get(name);
+  if (char) {
+    bubbles.add(name, entry.msg, 'work', 4000);
+  }
+}
+
+function handleCTeamIdle(entry) {
+  const name = entry.speaker;
+  if (!name) return;
+  const char = characters.get(name);
+  if (char && char._isCTeam) {
+    char.deactivateTool();
   }
 }
 
@@ -518,16 +693,39 @@ function init() {
   characters = new CharacterManager();
   bubbles = new BubbleManager();
   renderer = new Renderer(canvas);
+  particles = new ParticleManager();
+  physics = new PhysicsWorld();
+  physics.createStaticBodies(groundMap, furniture, TILE_SIZE, MAP_COLS, MAP_ROWS);
+  characters.initPhysics(physics);
   player = createPlayer();
+  physics.addCharacter('Player', player.x, player.y, { radius: 12 });
+
+  // Wall collision effects: 쿵 bounce + particles
+  physics.onWallHit((name, x, y, speed) => {
+    if (name === 'Player') return;
+    if (particles) {
+      particles.spawn(x, y - 15, '💫');
+      if (speed > 8) particles.spawn(x, y - 10, '😵');
+    }
+    const char = characters.get(name);
+    if (char && speed > 5) {
+      const msgs = ['으악!', '쿵!', '아야...', '헉!', 'ㅠㅠ'];
+      bubbles.add(name, msgs[Math.floor(Math.random() * msgs.length)], 'talk', 1500);
+    }
+  });
 
   engine.onUpdate((dt) => {
+    physics.update(dt);
     characters.update(dt);
     updatePlayer(dt);
+    handleWhip();
     bubbles.update(dt);
+    particles.update(dt);
   });
 
   engine.onRender((ctx) => {
     renderer.render(ctx, characters, bubbles, player);
+    particles.render(ctx);
   });
 
   engine.start();

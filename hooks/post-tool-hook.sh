@@ -76,7 +76,7 @@ if [ "$tool_name" = "Task" ]; then
         timestamp=$(date '+%H:%M:%S')
         epoch=$(date '+%s')
 
-        dialogue_type=$(echo "$prompt" | grep -o 'type: [a-z]*' | head -1 | cut -d' ' -f2)
+        dialogue_type=$(echo "$prompt" | grep -o 'type: [a-z-]*' | head -1 | cut -d' ' -f2)
         agent_name=$(echo "$prompt" | grep -oE 'agent: [A-Za-z]+' | head -1 | cut -d' ' -f2)
         agent_role=$(echo "$prompt" | grep -o 'agent_type: [a-z-]*' | head -1 | cut -d' ' -f2)
 
@@ -227,6 +227,140 @@ case "$tool_name" in
             jq -nc --arg ts "$ts" --arg ep "$ep" --arg cmd "$cmd" --arg summary "$summary" --arg detail "$output" \
                 '{ts:$ts,epoch:($ep|tonumber),type:"work-done",speaker:"Chris",role:"boss",msg:("💻 " + $cmd + " → " + $summary),detail:$detail}' >> "$HISTORY_FILE"
         }
+        ;;
+esac
+
+# ── C-Team AI 대화 + 데이터 (매 3번째 도구, dialogue-generator로 유머 전달) ──
+PLUGIN_DIR="${BACKSTAGE_DIR:-$HOME/.claude/plugins/backstage}"
+C_COUNTER_FILE="$PLUGIN_DIR/c-bubble-counter.txt"
+
+case "$tool_name" in
+    Read|Edit|Grep|Glob|Write|Bash)
+        counter=0
+        [ -f "$C_COUNTER_FILE" ] && counter=$(cat "$C_COUNTER_FILE" 2>/dev/null)
+        counter=$((counter + 1))
+        echo "$counter" > "$C_COUNTER_FILE"
+
+        if [ $((counter % 3)) -eq 0 ]; then
+            case "$tool_name" in
+                Read) c_name="Mia"; c_role="c-read"; c_desc="밝고 호기심 많음. 데이터 보면 흥분. ㅋㅋ 잘 씀" ;;
+                Edit) c_name="Kai"; c_role="c-edit"; c_desc="코드 장인. 깔끔함 집착. 변경에 예민" ;;
+                Grep) c_name="Zoe"; c_role="c-grep"; c_desc="검색 달인. 패턴 발견하면 흥분. 분석적" ;;
+                Glob) c_name="Liam"; c_role="c-glob"; c_desc="파일 정리광. 구조 파악 전문. 체계적" ;;
+                Write) c_name="Aria"; c_role="c-write"; c_desc="창작 좋아함. 새 파일에 설렘. 덮어쓰기엔 긴장" ;;
+                Bash) c_name="Noah"; c_role="c-bash"; c_desc="실행 담당. 빌드/테스트에 진심. 결과에 일희일비" ;;
+            esac
+
+            # Python으로 실제 데이터 추출 → dialogue-generator AI에 전달할 요약
+            data_summary=$(echo "$input" | python3 -c '
+import json, sys, os, re
+
+try:
+    data = json.load(sys.stdin)
+except:
+    sys.exit(1)
+
+tool = data.get("tool_name", "")
+ti = data.get("tool_input", {})
+tr = data.get("tool_response", {})
+
+def get_text(r):
+    if isinstance(r, str): return r
+    if isinstance(r, dict):
+        c = r.get("content", [])
+        if isinstance(c, list) and len(c) > 0:
+            if isinstance(c[0], dict): return c[0].get("text", "")
+            return str(c[0])
+        if isinstance(c, str): return c
+    return ""
+
+resp = get_text(tr)
+info = []
+
+if tool == "Read":
+    fp = ti.get("file_path", "")
+    fn = os.path.basename(fp)
+    ext = os.path.splitext(fn)[1]
+    lines = resp.split("\n") if resp else []
+    lc = len(lines)
+    imports = sum(1 for l in lines if "import " in l[:40] or "require(" in l)
+    funcs = sum(1 for l in lines if re.match(r".*\b(function |class |def |export (function|class|const) )", l))
+    comments = sum(1 for l in lines if l.strip().startswith(("//", "#", "/*", "*")))
+    info.append(f"파일: {fn}")
+    info.append(f"{lc}줄")
+    if imports: info.append(f"import {imports}개")
+    if funcs: info.append(f"함수/클래스 {funcs}개")
+    if comments == 0 and lc > 50: info.append("주석 없음")
+    if ext: info.append(f"타입: {ext}")
+
+elif tool == "Edit":
+    fp = ti.get("file_path", "")
+    fn = os.path.basename(fp)
+    old = ti.get("old_string", "")
+    new = ti.get("new_string", "")
+    ol = old.count("\n") + (1 if old.strip() else 0)
+    nl = new.count("\n") + (1 if new.strip() else 0)
+    info.append(f"파일: {fn}")
+    info.append(f"-{ol}줄 +{nl}줄")
+    d = abs(len(new) - len(old))
+    if d < 5: info.append("미세 조정")
+    elif d > 500: info.append("대규모 수정")
+    for l in new.split("\n"):
+        m = re.match(r"\s*(?:function |export (?:function|const|class) |def )(\w+)", l)
+        if m:
+            info.append(f"함수: {m.group(1)}")
+            break
+
+elif tool == "Grep":
+    pat = ti.get("pattern", "")[:30]
+    lines = [l for l in resp.split("\n") if l.strip()] if resp else []
+    mc = len(lines)
+    files = set()
+    for l in lines:
+        if ":" in l: files.add(l.split(":")[0])
+    info.append(f"패턴: {pat}")
+    info.append(f"{mc}곳 매칭")
+    if files: info.append(f"{len(files)}개 파일")
+
+elif tool == "Glob":
+    pat = ti.get("pattern", "")[:30]
+    lines = [l for l in resp.split("\n") if l.strip()] if resp else []
+    fc = len(lines)
+    info.append(f"패턴: {pat}")
+    info.append(f"{fc}개 파일")
+
+elif tool == "Write":
+    fp = ti.get("file_path", "")
+    fn = os.path.basename(fp)
+    content = ti.get("content", "")
+    lc = content.count("\n") + (1 if content.strip() else 0)
+    ext = os.path.splitext(fn)[1]
+    info.append(f"파일: {fn}")
+    info.append(f"{lc}줄")
+    if ext: info.append(f"타입: {ext}")
+
+elif tool == "Bash":
+    cmd = ti.get("command", "")[:60]
+    last_lines = resp.split("\n")[-5:] if resp else []
+    info.append(f"명령: {cmd}")
+    if "error" in resp[:500].lower(): info.append("에러 발생")
+    elif "success" in resp[:500].lower(): info.append("성공")
+    elif any("pass" in l.lower() for l in last_lines): info.append("테스트 통과")
+    elif any("fail" in l.lower() for l in last_lines): info.append("실패")
+
+print(", ".join(info) if info else "")
+' 2>/dev/null)
+
+            if [ -n "$data_summary" ]; then
+                # additionalContext로 dialogue-generator AI 호출 요청 (데이터 + 유머)
+                jq -nc --arg name "$c_name" --arg role "$c_role" --arg desc "$c_desc" --arg data "$data_summary" '{
+                    hookSpecificOutput: {
+                        hookEventName: "PostToolUse",
+                        additionalContext: ("[C-TEAM] dialogue-generator(sonnet)로 C-team 대사 생성해주세요:\ntype: c-bubble\nagent: " + $name + "\nagent_type: " + $role + "\n[상황] " + $name + "이(가) 도구 결과 데이터를 보고 IT 스타트업 동료답게 한마디.\n[데이터] " + $data + "\n[성격] " + $desc + "\n[필수] 실제 데이터를 자연스럽고 유머러스하게 전달. 15-30자. ㅋㅋ/ㅎㅎ OK.\n[금지] 보고서 말투, 30자 초과, 기술 용어 나열\nJSON만: {\"lines\": [{\"speaker\": \"" + $name + "\", \"msg\": \"...\"}]}")
+                    }
+                }'
+            fi
+        fi
         ;;
 esac
 

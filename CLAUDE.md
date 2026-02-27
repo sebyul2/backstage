@@ -1,5 +1,11 @@
 # Claude Backstage
 
+## Backstage 필수 규칙
+
+- **⚠️ CRITICAL: thinking/reasoning 한국어 필수**: 내부 thinking 블록을 반드시 한국어로 작성할 것. English thinking 절대 금지. backstage 뷰어에서 thinking 내용이 사용자에게 실시간 표시됨. 영어로 thinking하면 사용자가 읽을 수 없음. 모든 내부 사고를 한국어로.
+
+---
+
 ## Backstage Start/Stop Control
 
 사용자가 "backstage start/on" 또는 "backstage stop/off"이라고 하면 `/claude-backstage:backstage-toggle` 스킬을 실행.
@@ -75,7 +81,7 @@ agent_type: [AGENT_TYPE]
 - 파일명 정도만 언급하고 나머지는 자연어로
 - 실제 카톡/슬랙처럼 짧고 캐주얼하게
 - 드립이나 감정 리액션 1개 이상
-[형식] 3-5턴. 각 10-40자. 카톡 느낌. 한영혼용, ㅋㅋ/ㅠㅠ OK.
+[형식] 3-5턴. 각 10-60자. 카톡 느낌. 한영혼용, ㅋㅋ/ㅠㅠ OK.
 JSON만: {"lines": [{"speaker": "boss", "msg": "..."}, {"speaker": "agent", "msg": "..."}, ...]}
 
 예시 (참고만, 복사 금지):
@@ -108,7 +114,7 @@ agent_type: [AGENT_TYPE]
 - 결과를 자연어로 짧게. "3개 고쳤어요" "버그 있었어요" 수준
 - 감정 리액션 (안도, 놀람, 걱정 등)
 - 카톡/슬랙 느낌
-[형식] 3-5턴. 각 10-40자. 한영혼용.
+[형식] 3-5턴. 각 10-60자. 한영혼용.
 JSON만: {"lines": [{"speaker": "agent", "msg": "..."}, {"speaker": "boss", "msg": "..."}, ...]}
 
 예시 (참고만, 복사 금지):
@@ -192,7 +198,7 @@ type: update
 - 실제 뭘 하고 있는지 짧게
 - 감정/리액션 1개 이상 (놀람, 귀찮음, 뿌듯함, 짜증 등)
 - 가끔 TMI나 드립
-[형식] 1-3턴. boss만 또는 boss+client 짧은 리액션. 각 15-40자.
+[형식] 1-3턴. boss만 또는 boss+client 짧은 리액션. 각 15-60자.
 JSON만: {"lines": [{"speaker": "boss", "msg": "..."}]}
 
 예시 (참고만, 복사 금지):

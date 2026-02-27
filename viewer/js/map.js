@@ -1,5 +1,5 @@
 // map.js — Office + Break Room map: tile data, collision, furniture, positions
-// v2.1: 30x15 grid (1440x720), break room on right side
+// v2.5: Boss top, Lead middle, Agents bottom layout
 
 export const TILE_SIZE = 48;
 export const MAP_COLS = 30;
@@ -30,29 +30,29 @@ export const T = {
 export const groundMap = [
   // Row 0: top wall
   [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-  // Row 1
+  // Row 1 (boss desk)
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
-  // Row 2 (desks)
-  [1,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
-  // Row 3 (desks + sofa in break)
-  [1,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
-  // Row 4
+  // Row 2 (boss chair + rug)
+  [1,0,0,0,0,0,3,3,3,3,3,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
+  // Row 3 (rug + decorations)
+  [1,0,0,0,0,0,3,3,3,3,3,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
+  // Row 4 (lead desk)
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
-  // Row 5
+  // Row 5 (lead chair)
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
-  // Row 6 (plants)
+  // Row 6 (decorations)
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
   // Row 7 (doorway — cols 18,19 open)
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,4,4,4,4,4,4,4,4,4,1],
-  // Row 8 (rug + break table)
-  [1,0,0,0,0,0,3,3,3,3,3,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
-  // Row 9
-  [1,0,0,0,0,0,3,3,3,3,3,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
-  // Row 10
-  [1,0,0,0,0,0,3,3,3,3,3,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
-  // Row 11 (coffee, vending)
+  // Row 8 (top agent row)
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
-  // Row 12 (bookshelves)
+  // Row 9 (shared desks)
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
+  // Row 10 (shared desks)
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
+  // Row 11 (bottom agent row)
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
+  // Row 12 (decorations)
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
   // Row 13
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
@@ -63,95 +63,102 @@ export const groundMap = [
 // Furniture objects — rendered as entities, y-sorted with characters
 // x,y in tile coords; w,h in tiles
 export const furniture = [
-  // ═══ OFFICE (left side) ═══
+  // ═══ BOSS DESK (Player - CEO) — top of office ═══
+  { type: 'bossChair', x: 7.9, y: 1.4, w: 1.2, h: 1.2 },
+  { type: 'bossDesk', x: 7, y: 3, w: 3, h: 1 },
+  { type: 'monitor', x: 7.5, y: 3, w: 0.6, h: 0.3, back: true },
+  { type: 'monitor', x: 8.8, y: 3, w: 0.6, h: 0.3, back: true },
 
-  // Desks (left cluster)
-  { type: 'desk', x: 2, y: 2, w: 2, h: 2 },
-  { type: 'desk', x: 5, y: 2, w: 2, h: 2 },
-  // Desks (right cluster)
-  { type: 'desk', x: 12, y: 2, w: 2, h: 2 },
-  { type: 'desk', x: 15, y: 2, w: 2, h: 2 },
+  // ═══ LEAD DESK (Chris - Team Lead) — middle ═══
+  { type: 'leadChair', x: 8.05, y: 4.85, w: 0.8, h: 0.8 },
+  { type: 'leadDesk', x: 7, y: 6, w: 3, h: 1 },
+  { type: 'monitor', x: 8.1, y: 6, w: 0.8, h: 0.3, back: true },
 
-  // Monitors — bottom row (top edge of desk, facing bottom-row agents)
-  { type: 'monitor', x: 2.3, y: 2.1, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 3.3, y: 2.1, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 5.3, y: 2.1, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 6.3, y: 2.1, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 12.3, y: 2.1, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 13.3, y: 2.1, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 15.3, y: 2.1, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 16.3, y: 2.1, w: 0.6, h: 0.5 },
+  // ═══ TOP DECORATIONS ═══
+  { type: 'plant', x: 4, y: 2, w: 1, h: 1 },
+  { type: 'plant', x: 12, y: 2, w: 1, h: 1 },
+  { type: 'water', x: 17, y: 6, w: 1, h: 1 },
 
-  // Monitors — top row (bottom edge of desk, facing top-row agents)
-  { type: 'monitor', x: 2.3, y: 3.5, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 3.3, y: 3.5, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 5.3, y: 3.5, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 6.3, y: 3.5, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 12.3, y: 3.5, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 13.3, y: 3.5, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 15.3, y: 3.5, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 16.3, y: 3.5, w: 0.6, h: 0.5 },
+  // ═══ [C] TEAM DESKS (LEFT side, rows 8+11) ═══
+  // Row 8 top (facing DOWN)
+  { type: 'desk', x: 2, y: 8, w: 2, h: 1 },
+  { type: 'desk', x: 5, y: 8, w: 2, h: 1 },
+  // Row 11 bottom (facing UP)
+  { type: 'desk', x: 2, y: 11, w: 2, h: 1 },
+  { type: 'desk', x: 5, y: 11, w: 2, h: 1 },
 
-  // Chairs — bottom row (below desks, face UP)
-  { type: 'chair', x: 2.3, y: 3.8, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 3.3, y: 3.8, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 5.3, y: 3.8, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 6.3, y: 3.8, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 12.3, y: 3.8, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 13.3, y: 3.8, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 15.3, y: 3.8, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 16.3, y: 3.8, w: 0.7, h: 0.7 },
+  // [C] Team monitors — row 8: on desk (back view), row 11: on desk (front view)
+  { type: 'monitor', x: 2.2, y: 8, w: 0.6, h: 0.3, back: true },
+  { type: 'monitor', x: 3.2, y: 8, w: 0.6, h: 0.3, back: true },
+  { type: 'monitor', x: 5.2, y: 8, w: 0.6, h: 0.3, back: true },
+  { type: 'monitor', x: 6.2, y: 8, w: 0.6, h: 0.3, back: true },
+  { type: 'monitor', x: 2.2, y: 11, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 3.2, y: 11, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 5.2, y: 11, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 6.2, y: 11, w: 0.6, h: 0.5 },
 
-  // Chairs — top row (above desks, face DOWN)
-  { type: 'chair', x: 2.3, y: 1.3, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 3.3, y: 1.3, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 5.3, y: 1.3, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 6.3, y: 1.3, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 12.3, y: 1.3, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 13.3, y: 1.3, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 15.3, y: 1.3, w: 0.7, h: 0.7 },
-  { type: 'chair', x: 16.3, y: 1.3, w: 0.7, h: 0.7 },
+  // [C] Team chairs — row 8: above (y:7.15), row 11: below (y:12.15)
+  { type: 'chair', x: 2.15, y: 7.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 3.15, y: 7.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 5.15, y: 7.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 6.15, y: 7.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 2.15, y: 12.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 3.15, y: 12.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 5.15, y: 12.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 6.15, y: 12.15, w: 0.7, h: 0.7 },
 
-  // Plants (office)
-  { type: 'plant', x: 4, y: 6, w: 1, h: 1 },
-  { type: 'plant', x: 15, y: 6, w: 1, h: 1 },
+  // ═══ SEPARATOR (row 10) ═══
+  { type: 'plant', x: 4, y: 10, w: 1, h: 1 },
+  { type: 'whiteboard', x: 8, y: 10, w: 2, h: 1 },
+  { type: 'plant', x: 14, y: 10, w: 1, h: 1 },
 
-  // Coffee machine (left wall)
-  { type: 'coffee', x: 2, y: 11, w: 1, h: 1 },
+  // ═══ AGENT DESKS (RIGHT side, rows 8+11) ═══
+  // Row 8 top (facing DOWN)
+  { type: 'desk', x: 12, y: 8, w: 2, h: 1 },
+  { type: 'desk', x: 15, y: 8, w: 2, h: 1 },
+  // Row 11 bottom (facing UP)
+  { type: 'desk', x: 12, y: 11, w: 2, h: 1 },
+  { type: 'desk', x: 15, y: 11, w: 2, h: 1 },
 
-  // Whiteboard
-  { type: 'whiteboard', x: 14, y: 11, w: 2, h: 2 },
+  // Agent monitors — row 8: on desk (back view), row 11: on desk (front view)
+  { type: 'monitor', x: 12.2, y: 8, w: 0.6, h: 0.3, back: true },
+  { type: 'monitor', x: 13.2, y: 8, w: 0.6, h: 0.3, back: true },
+  { type: 'monitor', x: 15.2, y: 8, w: 0.6, h: 0.3, back: true },
+  { type: 'monitor', x: 16.2, y: 8, w: 0.6, h: 0.3, back: true },
+  { type: 'monitor', x: 12.2, y: 11, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 13.2, y: 11, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 15.2, y: 11, w: 0.6, h: 0.5 },
+  { type: 'monitor', x: 16.2, y: 11, w: 0.6, h: 0.5 },
 
-  // Water cooler
-  { type: 'water', x: 2, y: 7, w: 1, h: 1 },
+  // Agent chairs — row 8: above (y:7.15), row 11: below (y:12.15)
+  { type: 'chair', x: 12.15, y: 7.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 13.15, y: 7.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 15.15, y: 7.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 16.15, y: 7.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 12.15, y: 12.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 13.15, y: 12.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 15.15, y: 12.15, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 16.15, y: 12.15, w: 0.7, h: 0.7 },
 
-  // Bookshelf (bottom)
-  { type: 'bookshelf', x: 5, y: 12, w: 2, h: 1 },
+  // Bottom decorations
+  { type: 'bookshelf', x: 2, y: 13, w: 2, h: 1 },
+  { type: 'coffee', x: 17, y: 13, w: 1, h: 1 },
 
   // ═══ BREAK ROOM (right side) ═══
-
-  // Sofa (top area)
   { type: 'sofa', x: 23, y: 2, w: 3, h: 2 },
-
-  // Break table (middle)
+  { type: 'plant', x: 21, y: 2, w: 1, h: 1 },
+  { type: 'coffee', x: 27, y: 2, w: 1, h: 1 },
+  { type: 'sofa', x: 21, y: 5, w: 2, h: 1 },
+  { type: 'water', x: 27, y: 4, w: 1, h: 1 },
+  { type: 'plant', x: 26, y: 6, w: 1, h: 1 },
   { type: 'breakTable', x: 23, y: 8, w: 2, h: 2 },
-
-  // Vending machine
+  { type: 'chair', x: 22.15, y: 8.65, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 25.15, y: 8.65, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 22.15, y: 9.65, w: 0.7, h: 0.7 },
+  { type: 'chair', x: 25.15, y: 9.65, w: 0.7, h: 0.7 },
   { type: 'vending', x: 23, y: 11, w: 1, h: 2 },
-
-  // Plant (break room)
-  { type: 'plant', x: 26, y: 11, w: 1, h: 1 },
-
-  // ═══ LEAD DESK (Chris - Team Lead) ═══
-  { type: 'leadDesk', x: 8, y: 5, w: 3, h: 1 },
-  { type: 'monitor', x: 9.1, y: 5.1, w: 0.8, h: 0.5 },
-  { type: 'leadChair', x: 9.1, y: 6.0, w: 0.8, h: 0.8 },
-
-  // ═══ BOSS DESK (Player - CEO) ═══
-  { type: 'bossDesk', x: 7, y: 11, w: 3, h: 1 },
-  { type: 'monitor', x: 7.5, y: 11.1, w: 0.6, h: 0.5 },
-  { type: 'monitor', x: 8.8, y: 11.1, w: 0.6, h: 0.5 },
-  { type: 'bossChair', x: 8.0, y: 12.0, w: 1.2, h: 1.2 },
+  { type: 'bookshelf', x: 21, y: 12, w: 2, h: 1 },
+  { type: 'plant', x: 27, y: 12, w: 1, h: 1 },
 ];
 
 // Collision map — true = blocked
@@ -198,28 +205,29 @@ export function isPixelWalkable(px, py) {
 
 // Desk positions (pixel coords) — where agents SIT when working
 export const deskPositions = {
-  'Chris':   { x: 9.5 * TILE_SIZE, y: 6.15 * TILE_SIZE },
-  // Bottom row (face UP — dir:3)
-  'Jake':    { x: 2.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
-  'Emily':   { x: 3.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
-  'David':   { x: 5.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
-  'Michael': { x: 6.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
-  'Kevin':   { x: 12.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
-  'Alex':    { x: 13.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
-  'Sophie':  { x: 15.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
-  'Sam':     { x: 16.5 * TILE_SIZE, y: 4.15 * TILE_SIZE },
-  // Top row (face DOWN — dir:0)
-  'Ethan':   { x: 2.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
-  'Rachel':  { x: 3.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
-  'Leo':     { x: 5.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
-  'Daniel':  { x: 6.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
-  'Max':     { x: 12.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
-  'Tyler':   { x: 13.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
-  'Ryan':    { x: 15.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
-  'Eric':    { x: 16.5 * TILE_SIZE, y: 1.85 * TILE_SIZE, dir: 0 },
+  'Chris':   { x: 8.5 * TILE_SIZE, y: 5.5 * TILE_SIZE, dir: 0 },
+  // [C] Team LEFT — top row 8 (face DOWN) + bottom row 11 (face UP)
+  'Mia':  { x: 2.5 * TILE_SIZE, y: 7.85 * TILE_SIZE, dir: 0 },
+  'Kai':  { x: 3.5 * TILE_SIZE, y: 7.85 * TILE_SIZE, dir: 0 },
+  'Zoe':  { x: 5.5 * TILE_SIZE, y: 7.85 * TILE_SIZE, dir: 0 },
+  'Liam': { x: 6.5 * TILE_SIZE, y: 7.85 * TILE_SIZE, dir: 0 },
+  'Aria': { x: 2.5 * TILE_SIZE, y: 12.15 * TILE_SIZE, dir: 3 },
+  'Noah': { x: 3.5 * TILE_SIZE, y: 12.15 * TILE_SIZE, dir: 3 },
+  'Luna': { x: 5.5 * TILE_SIZE, y: 12.15 * TILE_SIZE, dir: 3 },
+  'Owen': { x: 6.5 * TILE_SIZE, y: 12.15 * TILE_SIZE, dir: 3 },
+  // Agents RIGHT — top row 8 (face DOWN) + bottom row 11 (face UP)
+  'Jake':    { x: 12.5 * TILE_SIZE, y: 7.85 * TILE_SIZE, dir: 0 },
+  'Emily':   { x: 13.5 * TILE_SIZE, y: 7.85 * TILE_SIZE, dir: 0 },
+  'David':   { x: 15.5 * TILE_SIZE, y: 7.85 * TILE_SIZE, dir: 0 },
+  'Michael': { x: 16.5 * TILE_SIZE, y: 7.85 * TILE_SIZE, dir: 0 },
+  'Kevin':   { x: 12.5 * TILE_SIZE, y: 12.15 * TILE_SIZE },
+  'Alex':    { x: 13.5 * TILE_SIZE, y: 12.15 * TILE_SIZE },
+  'Sophie':  { x: 15.5 * TILE_SIZE, y: 12.15 * TILE_SIZE },
+  'Sam':     { x: 16.5 * TILE_SIZE, y: 12.15 * TILE_SIZE },
 };
 
 // Break room positions (pixel coords) — where agents IDLE when not working
+// Only regular agents (8) — [C] team never leaves their desks
 export const breakPositions = {
   'Jake':    { x: 21.5 * TILE_SIZE, y: 4 * TILE_SIZE },
   'Emily':   { x: 22.5 * TILE_SIZE, y: 6 * TILE_SIZE },
@@ -227,16 +235,8 @@ export const breakPositions = {
   'Michael': { x: 27 * TILE_SIZE,   y: 3 * TILE_SIZE },
   'Kevin':   { x: 24.5 * TILE_SIZE, y: 10 * TILE_SIZE },
   'Alex':    { x: 26 * TILE_SIZE,   y: 9 * TILE_SIZE },
-  'Sophie':  { x: 21.5 * TILE_SIZE, y: 12 * TILE_SIZE },
+  'Sophie':  { x: 21.5 * TILE_SIZE, y: 13 * TILE_SIZE },
   'Sam':     { x: 25 * TILE_SIZE,   y: 6 * TILE_SIZE },
-  'Ethan':   { x: 23.5 * TILE_SIZE, y: 3 * TILE_SIZE },
-  'Rachel':  { x: 27 * TILE_SIZE,   y: 7 * TILE_SIZE },
-  'Leo':     { x: 24 * TILE_SIZE,   y: 5 * TILE_SIZE },
-  'Daniel':  { x: 22 * TILE_SIZE,   y: 9 * TILE_SIZE },
-  'Max':     { x: 23 * TILE_SIZE,   y: 11 * TILE_SIZE },
-  'Tyler':   { x: 26 * TILE_SIZE,   y: 11 * TILE_SIZE },
-  'Ryan':    { x: 24.5 * TILE_SIZE, y: 7 * TILE_SIZE },
-  'Eric':    { x: 27.5 * TILE_SIZE, y: 10 * TILE_SIZE },
 };
 
 // Break room wander zones — agents wander here when idle
@@ -246,5 +246,17 @@ export const breakWanderZones = [
   { x: 21, y: 10, w: 7, h: 3 },  // near vending
 ];
 
-// Player spawn position (at boss desk)
-export const playerSpawn = { x: 8.5 * TILE_SIZE, y: 12.5 * TILE_SIZE };
+// ─── Furniture interaction points (break room) ───────────────
+// Agents walk here and "interact" with nearby furniture (emoji + pause)
+export const furnitureInteractions = [
+  { name: 'coffee',    x: 26.5, y: 2.5, emoji: '☕', duration: 5000 },
+  { name: 'vending',   x: 24,   y: 11.5, emoji: '🥤', duration: 3500 },
+  { name: 'sofa',      x: 22,   y: 4,   emoji: '💤', duration: 8000 },
+  { name: 'bookshelf', x: 21.5, y: 11,  emoji: '📚', duration: 6000 },
+  { name: 'table',     x: 22.5, y: 8.5, emoji: '🃏', duration: 5000 },
+  { name: 'water',     x: 26.5, y: 4.5, emoji: '💧', duration: 3000 },
+  { name: 'lounge',    x: 21,   y: 6.5, emoji: '😴', duration: 7000 },
+];
+
+// Player spawn position (at boss desk — top of office)
+export const playerSpawn = { x: 8.5 * TILE_SIZE, y: 2.5 * TILE_SIZE };

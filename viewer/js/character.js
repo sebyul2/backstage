@@ -1,27 +1,28 @@
 // character.js — Character class: position, state machine, animation, movement
 // v2.1: break room lifecycle, no random office wandering
 
-import { TILE_SIZE, deskPositions, breakPositions, breakWanderZones, MAP_W, MAP_H } from './map.js?v=2.4.1';
-import { findPath, pixelToTile, tileToPixel } from './pathfinding.js?v=2.4.1';
-import { generateSpriteSheet } from './sprite-generator.js?v=2.4.1';
+import { TILE_SIZE, deskPositions, breakPositions, breakWanderZones, furnitureInteractions, MAP_W, MAP_H } from './map.js?v=2.5';
+import { findPath, pixelToTile, tileToPixel } from './pathfinding.js?v=2.5';
+import { generateSpriteSheet } from './sprite-generator.js?v=2.5';
 
 // States
 const S = {
-  IDLE: 'idle',                       // Chris/Player idle in office
+  IDLE: 'idle',                       // Chris/Player/[C]team idle
   IDLE_BREAK: 'idle_break',           // Agent idle in break room
   WALKING_BREAK: 'walking_break',     // Agent wandering in break room
   WALKING_TO: 'walking_to',           // Generic walk to target
   RUNNING_TO_DESK: 'running_to_desk', // Agent: break room → desk
-  WORKING: 'working',                 // Agent at desk working
+  WORKING: 'working',                 // Agent/[C]team at desk working
   WALKING_TO_BREAK: 'walking_to_break', // Agent: desk → break room
+  INTERACTING: 'interacting',         // Agent interacting with break room furniture
   TALKING: 'talking',                 // Showing speech bubble
 };
 
 // Direction: 0=down, 1=left, 2=right, 3=up
 const DIR = { DOWN: 0, LEFT: 1, RIGHT: 2, UP: 3 };
 
-const WALK_SPEED = 55;    // pixels per second (normal wandering)
-const RUN_SPEED = 1200;   // running to desk (10x fast)
+const WALK_SPEED = 82;    // pixels per second (normal wandering, 1.5x)
+const RUN_SPEED = 1800;   // running to desk (1.5x)
 const IDLE_MIN = 4000;   // ms before break room wander
 const IDLE_MAX = 10000;
 const ARRIVE_DIST = 6;
@@ -92,6 +93,16 @@ export class Character {
     this.tasksCompleted = 0;
     this.taskStartTime = 0;
 
+    // [C] Team flag (set by CharacterManager)
+    this._isCTeam = false;
+    this._cTeamTimeout = 0;
+
+    // Stun timer: blocks all state logic while > 0 (used by whip knockback)
+    this.stunTimer = 0;
+
+    // Physics reference (set by CharacterManager.initPhysics)
+    this.physics = null;
+
     // Generate sprite
     this.sprite = generateSpriteSheet(name);
   }
@@ -101,14 +112,21 @@ export class Character {
   }
 
   _pickBreakWanderTarget() {
-    // 30% chance to return to break home position
-    if (Math.random() < 0.3) {
+    const roll = Math.random();
+    if (roll < 0.3) {
+      // 30% → return to home position
       return { x: this.breakX, y: this.breakY };
+    } else if (roll < 0.7) {
+      // 40% → furniture interaction
+      const fi = furnitureInteractions[Math.floor(Math.random() * furnitureInteractions.length)];
+      return { x: fi.x * TILE_SIZE, y: fi.y * TILE_SIZE, interaction: fi };
+    } else {
+      // 30% → random wander
+      const zone = breakWanderZones[Math.floor(Math.random() * breakWanderZones.length)];
+      const tx = (zone.x + Math.random() * zone.w) * TILE_SIZE;
+      const ty = (zone.y + Math.random() * zone.h) * TILE_SIZE;
+      return { x: tx, y: ty };
     }
-    const zone = breakWanderZones[Math.floor(Math.random() * breakWanderZones.length)];
-    const tx = (zone.x + Math.random() * zone.w) * TILE_SIZE;
-    const ty = (zone.y + Math.random() * zone.h) * TILE_SIZE;
-    return { x: tx, y: ty };
   }
 
   _directionTo(tx, ty) {
@@ -132,8 +150,29 @@ export class Character {
     this.talkCallback = callback || null;
   }
 
+  // [C] Team: activate tool indicator (stay seated)
+  activateTool(tool, duration) {
+    if (!this._isCTeam) return;
+    this.workTool = tool;
+    this.workTimer = 0;
+    this._cTeamTimeout = duration || 8000;
+    this.state = S.WORKING;
+    this.dir = this.deskDir ?? 0;
+  }
+
+  // [C] Team: deactivate tool indicator (return to idle at desk)
+  deactivateTool() {
+    if (!this._isCTeam) return;
+    this.workTool = null;
+    this.workTarget = '';
+    this.state = S.IDLE;
+    this.dir = this.deskDir ?? 0;
+    this._cTeamTimeout = 0;
+  }
+
   // Agent: run from break room to desk and start working
   workAtDesk(tool, target) {
+    if (this._isCTeam) return; // [C] team uses activateTool instead
     this.workTool = tool || 'Read';
     this.workTarget = target || '';
     this.workTimer = 0;
@@ -193,6 +232,10 @@ export class Character {
     this.y = this.homeY;
     this.targetX = this.homeX;
     this.targetY = this.homeY;
+    // Sync physics body to desk position
+    if (this.physics && this.physics.enabled) {
+      this.physics.setPosition(this.name, this.homeX, this.homeY);
+    }
     this.state = S.WORKING;
     this.dir = this.deskDir ?? DIR.UP;
     this.stateTimer = 0;
@@ -209,8 +252,8 @@ export class Character {
 
   // Complete current task — walk back to break room
   completeTask() {
-    // Boss never leaves desk
     if (this.role === 'boss') return;
+    if (this._isCTeam) return; // [C] team never leaves desk
     if (this.currentTask) {
       this.tasksCompleted++;
       this.currentTask = null;
@@ -224,7 +267,7 @@ export class Character {
 
     const arriveAtBreak = () => {
       this.state = S.IDLE_BREAK;
-      this.dir = DIR.DOWN;
+      // Keep last facing direction (don't reset to DOWN)
       this.stateTimer = 0;
       this.idleDelay = this._randomIdleDelay();
     };
@@ -262,6 +305,18 @@ export class Character {
     this.stateTimer += dt * 1000;
     this.frameTimer += dt * 1000;
 
+    // Sync position from physics body
+    if (this.physics && this.physics.enabled) {
+      const pos = this.physics.getPosition(this.name);
+      if (pos) { this.x = pos.x; this.y = pos.y; }
+    }
+
+    // Stun: physics handles knockback movement, skip pathfinding/state logic
+    if (this.stunTimer > 0) {
+      this.stunTimer -= dt * 1000;
+      return;
+    }
+
     // Animation speed varies by state
     let animSpeed;
     switch (this.state) {
@@ -284,11 +339,12 @@ export class Character {
         break;
 
       case S.IDLE_BREAK:
-        // Agent in break room — occasionally wander
+        // Agent in break room — occasionally wander or interact with furniture
         if (this.stateTimer >= this.idleDelay) {
           const target = this._pickBreakWanderTarget();
           this.targetX = target.x;
           this.targetY = target.y;
+          this._pendingInteraction = target.interaction || null;
           this.state = S.WALKING_BREAK;
           this.stateTimer = 0;
         }
@@ -316,7 +372,9 @@ export class Character {
           // Return to previous state
           const prev = this._preTalkState;
           if (prev === S.WORKING) {
-            this.state = S.WORKING;
+            this.state = prev;
+          } else if (prev === S.INTERACTING) {
+            this.state = S.INTERACTING;
           } else if (prev === S.IDLE_BREAK || prev === S.WALKING_BREAK) {
             this.state = S.IDLE_BREAK;
           } else {
@@ -330,9 +388,27 @@ export class Character {
       case S.WORKING:
         this.workTimer += dt * 1000;
         this.totalWorkTime += dt * 1000;
-        // Safety timeout: if no new work event for 45s, assume task done (handles interrupts)
-        if (this.workTimer > 45000) {
-          this.completeTask();
+        if (this._isCTeam) {
+          // [C] team: auto-deactivate after timeout
+          if (this._cTeamTimeout && this.workTimer >= this._cTeamTimeout) {
+            this.deactivateTool();
+          }
+        } else {
+          // Regular agent: safety timeout 45s
+          if (this.workTimer > 45000) {
+            this.completeTask();
+          }
+        }
+        break;
+
+      case S.INTERACTING:
+        // Interacting with break room furniture (emoji shown by renderer)
+        if (this.stateTimer >= (this._interactionDuration || 5000)) {
+          this._interactionEmoji = null;
+          this._interactionDuration = 0;
+          this.state = S.IDLE_BREAK;
+          this.stateTimer = 0;
+          this.idleDelay = this._randomIdleDelay();
         }
         break;
     }
@@ -369,8 +445,18 @@ export class Character {
     const dy = waypoint.y - this.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist < 4) {
-      // Close enough to this waypoint — advance to next
+    // Arrival threshold scales with speed to prevent overshoot at high velocities
+    const baseV = speed / 60;
+    const arriveThreshold = Math.max(baseV * 2, 8);
+
+    if (dist < arriveThreshold) {
+      // Snap to waypoint, zero velocity, advance
+      this.x = waypoint.x;
+      this.y = waypoint.y;
+      if (this.physics && this.physics.enabled) {
+        this.physics.setPosition(this.name, waypoint.x, waypoint.y);
+        this.physics.setVelocity(this.name, 0, 0);
+      }
       this.pathIndex++;
       if (this.pathIndex >= this.path.length) {
         this.path = null;
@@ -380,11 +466,16 @@ export class Character {
       return;
     }
 
-    // Move toward current waypoint
+    // Physics velocity toward waypoint, clamped to prevent overshoot
     this.dir = this._directionTo(waypoint.x, waypoint.y);
-    const move = Math.min(speed * dt, dist);
-    this.x += (dx / dist) * move;
-    this.y += (dy / dist) * move;
+    const v = Math.min(baseV, dist * 0.4);
+    if (this.physics && this.physics.enabled) {
+      this.physics.setVelocity(this.name, (dx / dist) * v, (dy / dist) * v);
+    } else {
+      const move = Math.min(speed * dt, dist);
+      this.x += (dx / dist) * move;
+      this.y += (dy / dist) * move;
+    }
   }
 
   _moveDirectly(dt, speed) {
@@ -393,22 +484,54 @@ export class Character {
     const dy = this.targetY - this.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist < ARRIVE_DIST) {
+    const baseV = speed / 60;
+    const arriveThreshold = Math.max(baseV * 2, ARRIVE_DIST);
+
+    if (dist < arriveThreshold) {
+      this.x = this.targetX;
+      this.y = this.targetY;
+      if (this.physics && this.physics.enabled) {
+        this.physics.setPosition(this.name, this.targetX, this.targetY);
+        this.physics.setVelocity(this.name, 0, 0);
+      }
       this._onArrival();
       return;
     }
 
     this.dir = this._directionTo(this.targetX, this.targetY);
-    const move = Math.min(speed * dt, dist);
-    this.x += (dx / dist) * move;
-    this.y += (dy / dist) * move;
+    const v = Math.min(baseV, dist * 0.4);
+    if (this.physics && this.physics.enabled) {
+      this.physics.setVelocity(this.name, (dx / dist) * v, (dy / dist) * v);
+    } else {
+      const move = Math.min(speed * dt, dist);
+      this.x += (dx / dist) * move;
+      this.y += (dy / dist) * move;
+    }
   }
 
   _onArrival() {
+    // Stop physics movement on arrival
+    if (this.physics && this.physics.enabled) {
+      this.physics.setVelocity(this.name, 0, 0);
+    }
     if (this.talkCallback) {
       this.talkCallback();
       this.talkCallback = null;
-    } else if (this.state === S.WALKING_BREAK || this.state === S.WALKING_TO_BREAK) {
+    } else if (this.state === S.WALKING_BREAK) {
+      // Arrived at break room target — start interaction or idle
+      if (this._pendingInteraction) {
+        const fi = this._pendingInteraction;
+        this._pendingInteraction = null;
+        this._interactionEmoji = fi.emoji;
+        this._interactionDuration = fi.duration;
+        this.state = S.INTERACTING;
+        this.stateTimer = 0;
+      } else {
+        this.state = S.IDLE_BREAK;
+        this.stateTimer = 0;
+        this.idleDelay = this._randomIdleDelay();
+      }
+    } else if (this.state === S.WALKING_TO_BREAK) {
       this.state = S.IDLE_BREAK;
       this.stateTimer = 0;
       this.idleDelay = this._randomIdleDelay();
@@ -425,11 +548,15 @@ export class Character {
     const { frameWidth: fw, frameHeight: fh } = this.sprite;
     let row, col;
 
-    if (this.state === S.IDLE || this.state === S.IDLE_BREAK || this.state === S.TALKING) {
-      row = 4; // idle row
+    if (this.state === S.IDLE || this.state === S.IDLE_BREAK || this.state === S.TALKING || this.state === S.INTERACTING) {
+      if (this._isCTeam) {
+        row = this.deskDir ?? 0; // C-team faces desk direction even when idle
+      } else {
+        row = this.dir; // face last movement direction
+      }
       col = this.frame % 2;
     } else if (this.state === S.WORKING) {
-      row = 3; // face up (toward desk)
+      row = this.deskDir ?? 3; // face desk direction (UP for agents, DOWN for [C] team)
       col = this.frame % 2;
     } else {
       row = this.dir; // 0-3 for walk directions
@@ -452,7 +579,7 @@ export class Character {
   }
 
   get isInBreakRoom() {
-    return this.state === S.IDLE_BREAK || this.state === S.WALKING_BREAK;
+    return this.state === S.IDLE_BREAK || this.state === S.WALKING_BREAK || this.state === S.INTERACTING;
   }
 
   // Task elapsed time in seconds
@@ -473,19 +600,33 @@ export class CharacterManager {
     const chrisPos = deskPositions['Chris'];
     const chris = new Character('Chris', 'boss', chrisPos.x, chrisPos.y);
     chris.active = true;
-    chris.dir = 3; // Face UP (toward desk/monitor)
+    chris.dir = 0; // Face DOWN (toward agents)
     this.characters.set('Chris', chris);
 
-    // Agents — start in break room
+    // [C] Team — always at desk, never leave
+    const cTeam = [
+      ['Mia', 'c-read'], ['Kai', 'c-edit'],
+      ['Zoe', 'c-grep'], ['Liam', 'c-glob'],
+      ['Aria', 'c-write'], ['Noah', 'c-bash'],
+      ['Luna', 'c-task'], ['Owen', 'c-other'],
+    ];
+
+    for (const [name, role] of cTeam) {
+      const desk = deskPositions[name];
+      if (desk) {
+        const char = new Character(name, role, desk.x, desk.y);
+        char._isCTeam = true;
+        char.state = 'idle'; // Always at desk
+        char.dir = desk.dir ?? 0; // Face DOWN toward monitors
+        this.characters.set(name, char);
+      }
+    }
+
+    // Regular agents — start in break room
     const agents = [
-      // Bottom row (face UP)
       ['Jake', 'explore'], ['David', 'oracle'], ['Kevin', 'sisyphus-junior'],
       ['Sophie', 'frontend-engineer'], ['Emily', 'document-writer'],
       ['Michael', 'librarian'], ['Alex', 'prometheus'], ['Sam', 'qa-tester'],
-      // Top row (face DOWN)
-      ['Ethan', 'code-reviewer'], ['Rachel', 'critic'], ['Leo', 'debugger'],
-      ['Daniel', 'scientist'], ['Max', 'build-fixer'], ['Tyler', 'test-engineer'],
-      ['Ryan', 'security-reviewer'], ['Eric', 'git-master'],
     ];
 
     for (const [name, role] of agents) {
@@ -494,6 +635,14 @@ export class CharacterManager {
         const char = new Character(name, role, brk.x, brk.y);
         this.characters.set(name, char);
       }
+    }
+  }
+
+  initPhysics(physicsWorld) {
+    for (const [name, char] of this.characters) {
+      char.physics = physicsWorld;
+      const isStatic = char.role === 'boss' || char._isCTeam;
+      physicsWorld.addCharacter(name, char.x, char.y, { radius: 12, isStatic });
     }
   }
 
@@ -511,24 +660,39 @@ export class CharacterManager {
     return [...this.characters.values()].sort((a, b) => a.sortY - b.sortY);
   }
 
-  // Get active (working) agents
+  // Get active (working) regular agents (excludes [C] team)
   getActiveAgents() {
-    return [...this.characters.values()].filter(c => c.name !== 'Chris' && c.isWorking);
+    return [...this.characters.values()].filter(c =>
+      c.name !== 'Chris' && !c._isCTeam && c.isWorking
+    );
   }
 
   // Get idle agents (in break room)
   getIdleAgents() {
-    return [...this.characters.values()].filter(c => c.name !== 'Chris' && c.isInBreakRoom);
+    return [...this.characters.values()].filter(c =>
+      c.name !== 'Chris' && !c._isCTeam && c.isInBreakRoom
+    );
+  }
+
+  // Get [C] team members currently active
+  getActiveCTeam() {
+    return [...this.characters.values()].filter(c =>
+      c._isCTeam && c.state === 'working'
+    );
   }
 
   // Get stats for UI
   getStats() {
-    const agents = [...this.characters.values()].filter(c => c.name !== 'Chris');
+    const agents = [...this.characters.values()].filter(c =>
+      c.name !== 'Chris' && !c._isCTeam
+    );
+    const cTeam = [...this.characters.values()].filter(c => c._isCTeam);
     return {
       total: agents.length,
       active: agents.filter(c => c.isWorking).length,
       idle: agents.filter(c => c.isInBreakRoom).length,
       tasksCompleted: agents.reduce((sum, c) => sum + c.tasksCompleted, 0),
+      cTeamActive: cTeam.filter(c => c.state === 'working').length,
     };
   }
 
@@ -537,7 +701,6 @@ export class CharacterManager {
       if (char.role === role) return char;
     }
     const nameMap = {
-      // Bottom row
       'explore': 'Jake', 'explore-medium': 'Jake',
       'oracle': 'David', 'oracle-medium': 'David', 'oracle-low': 'David',
       'sisyphus-junior': 'Kevin', 'sisyphus-junior-low': 'Kevin', 'sisyphus-junior-high': 'Kevin',
@@ -546,15 +709,10 @@ export class CharacterManager {
       'librarian': 'Michael', 'librarian-low': 'Michael',
       'prometheus': 'Alex',
       'qa-tester': 'Sam',
-      // Top row
-      'code-reviewer': 'Ethan', 'quality-reviewer': 'Ethan',
-      'critic': 'Rachel', 'analyst': 'Rachel',
-      'debugger': 'Leo',
-      'scientist': 'Daniel',
-      'build-fixer': 'Max',
-      'test-engineer': 'Tyler',
-      'security-reviewer': 'Ryan',
-      'git-master': 'Eric',
+      // [C] Team
+      'c-read': 'Mia', 'c-edit': 'Kai', 'c-grep': 'Zoe',
+      'c-glob': 'Liam', 'c-write': 'Aria', 'c-bash': 'Noah',
+      'c-task': 'Luna', 'c-other': 'Owen',
     };
     const name = nameMap[role];
     if (name) return this.characters.get(name);

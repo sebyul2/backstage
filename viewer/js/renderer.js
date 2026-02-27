@@ -49,6 +49,10 @@ const NAME_COLORS = {
   'sisyphus-junior': '#FB923C', 'frontend-engineer': '#F9A8D4',
   'document-writer': '#FCD34D', 'librarian': '#6EE7B7',
   'prometheus': '#93C5FD', 'qa-tester': '#FCA5A5', 'player': '#FFFFFF',
+  // C Team — same color as Chris (boss)
+  'c-read': '#60A5FA', 'c-edit': '#60A5FA', 'c-grep': '#60A5FA',
+  'c-glob': '#60A5FA', 'c-write': '#60A5FA', 'c-bash': '#60A5FA',
+  'c-task': '#60A5FA', 'c-other': '#60A5FA',
 };
 
 export class Renderer {
@@ -288,12 +292,39 @@ export class Renderer {
     const x = f.x * TS, y = f.y * TS;
     const w = f.w * TS, h = f.h * TS;
     const glowColor = toolColor || null;
+    const isBack = f.back;
 
     if (glowColor) {
       ctx.fillStyle = glowColor.replace(')', ',0.15)').replace('rgb', 'rgba');
       ctx.fillRect(x - 5, y - 5, w + 10, h + 15);
     }
 
+    if (isBack) {
+      // Back view — show rear panel (no screen visible)
+      ctx.fillStyle = '#3A3A50';
+      ctx.fillRect(x, y, w, h);
+      // Rear panel detail lines
+      ctx.fillStyle = '#2A2A3A';
+      ctx.fillRect(x + 3, y + 3, w - 6, h - 6);
+      // Ventilation slots
+      ctx.fillStyle = '#4A4A5A';
+      ctx.fillRect(x + 5, y + 5, w * 0.3, 2);
+      ctx.fillRect(x + 5, y + 9, w * 0.2, 2);
+      // Active glow from behind
+      if (glowColor) {
+        ctx.fillStyle = glowColor;
+        ctx.globalAlpha = 0.3;
+        ctx.fillRect(x - 2, y + h, w + 4, 4);
+        ctx.globalAlpha = 1;
+      }
+      // Stand (on top since screen faces away)
+      ctx.fillStyle = '#4A5568';
+      ctx.fillRect(x + w/2 - 3, y + h, 6, 6);
+      ctx.fillRect(x + w/2 - 6, y + h + 5, 12, 3);
+      return;
+    }
+
+    // Front view — show screen
     ctx.fillStyle = PAL.monitorBody;
     ctx.fillRect(x, y, w, h);
     ctx.fillStyle = glowColor ? '#0D1117' : PAL.monitorScreen;
@@ -856,6 +887,20 @@ export class Renderer {
       char.x - 24, char.y - 24, 48, 48
     );
 
+    // Furniture interaction emoji (floating above head with bob)
+    if (char._interactionEmoji) {
+      const bobY = Math.sin(this.tick * 0.08) * 3;
+      ctx.font = '20px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.globalAlpha = 0.9;
+      ctx.fillText(char._interactionEmoji, char.x, char.y - 30 + bobY);
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'left';
+    }
+    // Name tag and work indicator drawn in separate top-layer pass
+  }
+
+  _drawNameTag(ctx, char, isPlayer) {
     // Work indicator (tool + file + elapsed)
     if (char.isWorking && char.workTool) {
       this._drawWorkIndicator(ctx, char);
@@ -938,7 +983,14 @@ export class Renderer {
         const toolInfo = TOOL_ICONS[char.workTool];
         if (toolInfo) {
           const mx = Math.round(char.homeX / TS - 0.2);
-          const my = Math.round(char.homeY / TS - 2.7);
+          let my;
+          if (char.deskDir === 0) {
+            // Facing DOWN → monitor on desk (y + 0.15 → rounds to desk row)
+            my = Math.round(char.homeY / TS + 0.15);
+          } else {
+            // Facing UP → monitor on desk (y - 1.0 → rounds to desk row)
+            my = Math.round(char.homeY / TS - 1.0);
+          }
           const key = `${mx},${my}`;
           activeTools.set(key, toolInfo.color);
           workInfoMap.set(key, { tool: char.workTool, target: char.workTarget });
@@ -948,8 +1000,16 @@ export class Renderer {
 
     // 3. Collect entities for y-sorting
     const entities = [];
+    const backMonitors = []; // back-view monitors render on top of everything
     for (const f of furniture) {
-      entities.push({ type: 'f', data: f, sortY: this._furnitureSortY(f) });
+      if (f.type === 'monitor' && f.back) {
+        backMonitors.push(f);
+      } else if (f.type === 'monitor') {
+        // Front monitors: sortY just after their desk, before characters
+        entities.push({ type: 'f', data: f, sortY: (Math.ceil(f.y) + 1) * TS + 1 });
+      } else {
+        entities.push({ type: 'f', data: f, sortY: this._furnitureSortY(f) });
+      }
     }
     for (const char of characters.getSorted()) {
       entities.push({ type: 'c', data: char, sortY: char.sortY, isPlayer: false });
@@ -959,12 +1019,25 @@ export class Renderer {
     }
     entities.sort((a, b) => a.sortY - b.sortY);
 
-    // 4. Render
+    // 4. Render furniture + front monitors + characters (y-sorted)
     for (const ent of entities) {
       if (ent.type === 'f') {
         this._drawFurniture(ctx, ent.data, activeTools, workInfoMap, activeAgents);
       } else {
         this._drawCharacter(ctx, ent.data, ent.isPlayer);
+      }
+    }
+
+    // 4.25. Back-view monitors (on top of desks + characters)
+    backMonitors.sort((a, b) => a.y - b.y);
+    for (const f of backMonitors) {
+      this._drawFurniture(ctx, f, activeTools, workInfoMap, activeAgents);
+    }
+
+    // 4.5. Name tags + work indicators (always on top of everything)
+    for (const ent of entities) {
+      if (ent.type === 'c') {
+        this._drawNameTag(ctx, ent.data, ent.isPlayer);
       }
     }
 
@@ -989,43 +1062,45 @@ export class Renderer {
     const stats = characters.getStats();
 
     // ─── Top left: title + status ───
+    const pad = 10;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    this._roundRect(ctx, 4, 4, 180, 24, 4);
+    this._roundRect(ctx, pad, pad, 180, 24, 4);
     ctx.fill();
 
     ctx.font = '14px "Menlo", "Consolas", monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = '#29ADFF';
-    ctx.fillText('BACKSTAGE', 10, 20);
+    ctx.fillText('BACKSTAGE', pad + 6, pad + 16);
 
     const dotColors = { connected: '#68D391', connecting: '#ECC94B', disconnected: '#FC8181' };
     ctx.fillStyle = dotColors[this.connectionStatus] || dotColors.connecting;
     ctx.beginPath();
-    ctx.arc(168, 16, 3, 0, Math.PI * 2);
+    ctx.arc(pad + 164, pad + 12, 3, 0, Math.PI * 2);
     ctx.fill();
 
     // ─── Top right: agent stats ───
     ctx.font = '12px "Menlo", "Consolas", monospace';
-    const statsText = `Active: ${stats.active}/${stats.total}  Idle: ${stats.idle}  Done: ${stats.tasksCompleted}`;
+    const cTeamText = stats.cTeamActive > 0 ? `  [C]: ${stats.cTeamActive}` : '';
+    const statsText = `Active: ${stats.active}/${stats.total}  Idle: ${stats.idle}  Done: ${stats.tasksCompleted}${cTeamText}`;
     const sw = ctx.measureText(statsText).width + 12;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    this._roundRect(ctx, MAP_W - sw - 4, 4, sw, 24, 4);
+    this._roundRect(ctx, MAP_W - sw - pad, pad, sw, 24, 4);
     ctx.fill();
 
     ctx.fillStyle = stats.active > 0 ? '#68D391' : '#718096';
     ctx.textAlign = 'right';
-    ctx.fillText(statsText, MAP_W - 10, 20);
+    ctx.fillText(statsText, MAP_W - pad - 6, pad + 16);
     ctx.textAlign = 'left';
 
     // ─── Bottom: active agents bar with task description + elapsed ───
     if (stats.active > 0) {
       const activeAgents = characters.getActiveAgents();
-      let bx = 6;
-      const by = MAP_H - 32;
+      let bx = pad + 6;
+      const by = MAP_H - pad - 2;
 
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      const barW = Math.min(activeAgents.length * 200 + 10, MAP_W - 4);
-      this._roundRect(ctx, 2, by - 2, barW, 28, 4);
+      const barW = Math.min(activeAgents.length * 200 + 10, MAP_W - pad * 2);
+      this._roundRect(ctx, pad, by - 2, barW, 28, 4);
       ctx.fill();
 
       ctx.font = '12px "Menlo", "Consolas", monospace';
@@ -1061,9 +1136,12 @@ export class Renderer {
     ctx.textAlign = 'center';
     ctx.globalAlpha = 0.3;
 
-    // Office label
-    ctx.fillStyle = '#29ADFF';
-    ctx.fillText('OFFICE', 9 * TS, MAP_H - 10);
+    // Section labels (between row 8 and row 11, on separator)
+    ctx.fillStyle = '#60A5FA';
+    ctx.fillText('CHRIS TEAM', 4.5 * TS, 10.5 * TS);
+
+    ctx.fillStyle = '#34D399';
+    ctx.fillText('AGENTS', 14.5 * TS, 10.5 * TS);
 
     // Break room label
     ctx.fillStyle = '#FFA300';
