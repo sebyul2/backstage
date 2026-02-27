@@ -285,4 +285,32 @@ html, body {
 ::-webkit-scrollbar-thumb { background: rgba(41, 173, 255, 0.15); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(41, 173, 255, 0.3); }
 
+/* ─── Session End Overlay ─────────────────────────────────────── */
+
+#session-end-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: overlay-in 0.5s ease;
+}
+
+.session-end-box {
+  text-align: center;
+  color: #E2E8F0;
+  font-family: 'DungGeunMo', monospace;
+}
+
+.session-end-icon { font-size: 48px; margin-bottom: 16px; }
+.session-end-title { font-size: 20px; color: #FC8181; margin-bottom: 8px; }
+.session-end-desc { font-size: 14px; color: #A0AEC0; }
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* ─── Responsive: zoom is set in #app above ──────────────────── */

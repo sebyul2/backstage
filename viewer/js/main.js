@@ -13,6 +13,8 @@ let player = null;
 let eventSource = null;
 let reconnectTimer = null;
 let reconnectDelay = 1000;
+let reconnectAttempts = 0;
+const MAX_RECONNECT = 5;
 
 // ─── Keyboard state ─────────────────────────────────────────────
 const keys = { up: false, down: false, left: false, right: false };
@@ -334,6 +336,7 @@ function connectSSE() {
     renderer.connectionStatus = 'connected';
     updateChatIndicator('connected');
     reconnectDelay = 1000;
+    reconnectAttempts = 0;
     loadHistory();
   });
 
@@ -353,6 +356,14 @@ function connectSSE() {
     updateChatIndicator('disconnected');
     eventSource.close();
     eventSource = null;
+    reconnectAttempts++;
+
+    if (reconnectAttempts >= MAX_RECONNECT) {
+      renderer.connectionStatus = 'dead';
+      showSessionEndOverlay();
+      return;
+    }
+
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(() => {
       reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
@@ -511,6 +522,21 @@ function init() {
 
   engine.start();
   connectSSE();
+}
+
+// ─── Session End Overlay ─────────────────────────────────────────
+
+function showSessionEndOverlay() {
+  if (document.getElementById('session-end-overlay')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'session-end-overlay';
+  overlay.innerHTML = `
+    <div class="session-end-box">
+      <div class="session-end-icon">⚡</div>
+      <div class="session-end-title">세션이 종료되었습니다</div>
+      <div class="session-end-desc">서버와의 연결이 끊어졌습니다</div>
+    </div>`;
+  document.getElementById('game-container').appendChild(overlay);
 }
 
 // Wait for fonts then init

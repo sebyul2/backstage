@@ -975,6 +975,10 @@ const server = Bun.serve({
         return new Response("Method Not Allowed", { status: 405, headers: CORS_HEADERS });
       case "/characters":
         return await handleCharacters();
+      case "/status":
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
       default:
         if (url.pathname.startsWith("/js/") || url.pathname.startsWith("/css/") || url.pathname.startsWith("/sprites/")) {
           return await handleStaticFile(url.pathname);
@@ -989,6 +993,10 @@ const server = Bun.serve({
 
 console.log(`Backstage viewer running at http://localhost:${PORT}`);
 
+// Write own PID for reliable process management (launch.sh PID may differ)
+const PID_FILE = path.join(PLUGIN_DIR, "viewer.pid");
+try { fs.writeFileSync(PID_FILE, String(process.pid)); } catch {}
+
 // ─── Timers ──────────────────────────────────────────────────────
 
 // Transcript scanner: every 3 seconds
@@ -1001,12 +1009,26 @@ const idleChatTimer = setInterval(() => {
   try { generateIdleChat(); } catch {}
 }, 20_000);
 
+// ─── Auto-shutdown: no SSE listeners for 10 minutes ──────────
+let lastListenerTime = Date.now();
+const IDLE_SHUTDOWN_MS = 10 * 60 * 1000; // 10 minutes
+
+const idleCheckTimer = setInterval(() => {
+  if (activeConnections.size > 0) {
+    lastListenerTime = Date.now();
+  } else if (Date.now() - lastListenerTime >= IDLE_SHUTDOWN_MS) {
+    console.log("No SSE listeners for 10 minutes, auto-shutting down...");
+    shutdown();
+  }
+}, 30_000); // check every 30s
+
 // ─── Shutdown ───────────────────────────────────────────────────
 
 function shutdown(): void {
   console.log("\nShutting down...");
   clearInterval(transcriptScanTimer);
   clearInterval(idleChatTimer);
+  clearInterval(idleCheckTimer);
   for (const conn of activeConnections) {
     conn.close();
   }
@@ -1017,3 +1039,4 @@ function shutdown(): void {
 
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
+process.on("SIGHUP", () => {}); // Ignore SIGHUP — keep running when terminal closes
