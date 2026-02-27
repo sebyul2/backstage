@@ -1052,6 +1052,6 @@ function shutdown(): void {
   process.exit(0);
 }
 
-process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 process.on("SIGHUP", () => {}); // Ignore SIGHUP — keep running when terminal closes
+process.on("SIGTERM", () => {}); // Ignore SIGTERM — parent shell exit sends this; stop via SIGKILL or auto-shutdown

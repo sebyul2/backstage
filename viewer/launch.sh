@@ -22,7 +22,7 @@ if [ -f "$PID_FILE" ]; then
     fi
 fi
 
-# Bun 서버 백그라운드 시작 (bun 직접 실행 — bun run은 자식 프로세스 생성으로 PID 불일치)
+# Bun 서버 백그라운드 시작 (nohup + bun 직접 실행)
 BACKSTAGE_PORT="$PORT" nohup bun "$SERVER_FILE" > /tmp/backstage-viewer.log 2>&1 &
 SERVER_PID=$!
 disown $SERVER_PID 2>/dev/null
