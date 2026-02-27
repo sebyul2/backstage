@@ -1,9 +1,26 @@
 import { homedir } from "os";
 import * as path from "path";
 import * as fs from "fs";
+import { spawn } from "child_process";
 import Anthropic from '@anthropic-ai/sdk';
 
 const PLUGIN_DIR = path.join(homedir(), ".claude/plugins/backstage");
+
+// ─── Self-daemonize: fork detached child and exit ────────────
+// Standard Unix daemon pattern — works on any shell/terminal/environment
+if (!process.env.BACKSTAGE_DAEMON) {
+  const child = spawn(process.execPath, [import.meta.path], {
+    env: { ...process.env, BACKSTAGE_DAEMON: "1" },
+    stdio: ["ignore", fs.openSync("/tmp/backstage-viewer.log", "a"), fs.openSync("/tmp/backstage-viewer.log", "a")],
+    detached: true,
+  });
+  child.unref();
+  const pidFile = path.join(PLUGIN_DIR, "viewer.pid");
+  fs.mkdirSync(PLUGIN_DIR, { recursive: true });
+  fs.writeFileSync(pidFile, String(child.pid));
+  console.log(`Backstage daemon started (PID: ${child.pid})`);
+  process.exit(0);
+}
 const HISTORY_FILE =
   process.env.BACKSTAGE_HISTORY ||
   path.join(PLUGIN_DIR, "history.jsonl");
@@ -1054,4 +1071,3 @@ function shutdown(): void {
 
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
-process.on("SIGHUP", () => {}); // Ignore SIGHUP — terminal close (covered by nohup too)
