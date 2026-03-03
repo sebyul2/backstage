@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Backstage v2.5</title>
-<link rel="stylesheet" href="/css/game.css?v=2.7">
+<title>Backstage v2.8</title>
+<link rel="stylesheet" href="/css/game.css?v=2.8">
 <script src="/js/lib/matter.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', fitViewport);
 
 <!-- Loading screen -->
 <div id="loading">
-  <div class="title">BACKSTAGE v2.5</div>
+  <div class="title">BACKSTAGE v2.8</div>
   <div class="dots">Loading</div>
 </div>
 
@@ -54,7 +54,7 @@ document.addEventListener('DOMContentLoaded', fitViewport);
   };
 
   try {
-    await import('./js/main.js?v=2.7');
+    await import('./js/main.js?v=2.8');
   } catch (e) {
     document.getElementById('loading').innerHTML =
       `<div style="color:#FC8181;font-size:14px;padding:20px;">

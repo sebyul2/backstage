@@ -592,7 +592,7 @@ function scanTranscriptForAgentWork(): void {
   for (const line of lines) {
     try {
       const entry = JSON.parse(line);
-      if (entry.type !== "human" || entry.message?.role !== "human") continue;
+      if (entry.type !== "user" || entry.message?.role !== "user") continue;
       if (!entry.message?.content) continue;
 
       for (const block of entry.message.content) {
@@ -757,9 +757,25 @@ function scanTranscriptForAgentWork(): void {
 
   // ═══ Chris 대화록 챕터 로깅 ═══
   // 새 assistant 응답에서 thinking + text + tools를 하나의 챕터로 구조화
+  // history.jsonl의 request 이벤트에서 최근 사용자 메시지 추출
+  let chapterUserMsg = '';
+  try {
+    const histContent = fs.existsSync(HISTORY_FILE) ? fs.readFileSync(HISTORY_FILE, 'utf-8') : '';
+    const histLines = histContent.trim().split('\n').reverse();
+    for (const hl of histLines) {
+      try {
+        const he = JSON.parse(hl);
+        if (he.type === 'request' && he.msg && he.msg.length >= 3) {
+          chapterUserMsg = he.msg.split('\n')[0].slice(0, 100);
+          break;
+        }
+      } catch {}
+    }
+  } catch {}
   for (const line of lines) {
     try {
       const entry = JSON.parse(line);
+
       if (entry.type !== "assistant" || entry.message?.role !== "assistant") continue;
       if (!entry.message?.content) continue;
 
@@ -773,8 +789,8 @@ function scanTranscriptForAgentWork(): void {
       let responseText = '';
       // 사용자 메시지에서 핵심 주제 추출 (강력 요약)
       let chapterTitle = '';
-      if (lastUserMessage) {
-        let line = lastUserMessage.split('\n')[0].trim();
+      if (chapterUserMsg) {
+        let line = chapterUserMsg.trim();
         line = line.replace(/^\d+[\.\)]\s*/, '');  // 번호 리스트 접두어 제거
         line = line.replace(/[.。!！?？…~]+$/g, '')
           .replace(/\s*(해\s*줘|해주세요|하세요|해봐|부탁|좀|할\s*것|하기)\s*$/g, '')
@@ -782,6 +798,8 @@ function scanTranscriptForAgentWork(): void {
         chapterTitle = line.length > 40 ? line.slice(0, 40) + '…' : (line || '');
       }
       const files: string[] = [];
+      const tools: { name: string, detail: string }[] = [];
+      const agents: { type: string, desc: string }[] = [];
 
       for (const block of entry.message.content) {
         if (block.type === 'thinking' && block.thinking) {
@@ -818,11 +836,23 @@ function scanTranscriptForAgentWork(): void {
         }
 
         if (block.type === 'tool_use') {
+          const toolName = block.name || '';
           const input = block.input as any;
           const fp = input?.file_path || input?.path || input?.command || '';
           if (typeof fp === 'string' && fp.length > 0) {
             const basename = fp.split('/').pop() || fp;
             if (!files.includes(basename)) files.push(basename);
+          }
+          // Agent/Task 수집
+          if ((toolName === 'Agent' || toolName === 'Task') && input?.subagent_type) {
+            const agentType = String(input.subagent_type).replace(/^oh-my-claudecode:/, '');
+            const desc = (input.description || input.prompt || '').slice(0, 60);
+            agents.push({ type: agentType, desc });
+          } else if (toolName && toolName !== 'Agent' && toolName !== 'Task') {
+            // 일반 도구 수집
+            const detail = fp ? (fp.split('/').pop() || fp).slice(0, 40) : '';
+            const existing = tools.find(t => t.name === toolName && t.detail === detail);
+            if (!existing) tools.push({ name: toolName, detail });
           }
         }
       }
@@ -834,7 +864,7 @@ function scanTranscriptForAgentWork(): void {
       }
 
       // 같은 사용자 메시지 주제면 기존 챕터에 병합
-      if (lastUserMessage && lastUserMessage === lastChapterUserMsg) {
+      if (chapterUserMsg && chapterUserMsg === lastChapterUserMsg) {
         try {
           const logContent = fs.existsSync(CHRIS_LOG_FILE) ? fs.readFileSync(CHRIS_LOG_FILE, 'utf-8') : '';
           const logLines = logContent.trim().split('\n').filter(Boolean);
@@ -850,6 +880,14 @@ function scanTranscriptForAgentWork(): void {
             for (const f of files) {
               if (!lastEntry.files.includes(f)) lastEntry.files.push(f);
             }
+            if (!lastEntry.tools) lastEntry.tools = [];
+            for (const t of tools) {
+              if (!lastEntry.tools.find((x: any) => x.name === t.name && x.detail === t.detail)) lastEntry.tools.push(t);
+            }
+            if (!lastEntry.agents) lastEntry.agents = [];
+            for (const a of agents) {
+              if (!lastEntry.agents.find((x: any) => x.type === a.type && x.desc === a.desc)) lastEntry.agents.push(a);
+            }
             lastEntry.ts = new Date().toTimeString().slice(0, 8);
             logLines[logLines.length - 1] = JSON.stringify(lastEntry);
             fs.writeFileSync(CHRIS_LOG_FILE, logLines.join('\n') + '\n');
@@ -859,14 +897,17 @@ function scanTranscriptForAgentWork(): void {
       }
 
       // 새 챕터 생성
-      lastChapterUserMsg = lastUserMessage;
+      lastChapterUserMsg = chapterUserMsg;
       const chapterEntry = JSON.stringify({
         ts: new Date().toTimeString().slice(0, 8),
         epoch: nowEpoch,
         title: chapterTitle,
+        userMsg: chapterUserMsg,
         thinks: thinkLines,
         response: responseText,
         files,
+        tools: tools.slice(0, 20),
+        agents: agents.slice(0, 10),
       });
 
       try { fs.appendFileSync(CHRIS_LOG_FILE, chapterEntry + '\n'); } catch {}

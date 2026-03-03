@@ -1309,8 +1309,20 @@ async function showChrisLogPopup() {
     if (res.ok) chapters = await res.json();
   } catch {}
 
-  // 최신 순으로
-  chapters.reverse();
+  // userMsg 기준으로 그룹핑
+  const groups = [];
+  let currentGroup = null;
+  for (const ch of chapters) {
+    const key = ch.userMsg || ch.title || '(무제)';
+    if (!currentGroup || currentGroup.userMsg !== key) {
+      currentGroup = { userMsg: key, ts: ch.ts, chapters: [ch] };
+      groups.push(currentGroup);
+    } else {
+      currentGroup.chapters.push(ch);
+      currentGroup.ts = ch.ts; // 최신 시간으로 업데이트
+    }
+  }
+  groups.reverse(); // 최신 순
 
   // 캔버스 위치 기준 정렬
   const canvasEl = document.getElementById('game');
@@ -1370,27 +1382,27 @@ async function showChrisLogPopup() {
   popup.appendChild(closeBtn);
   popup.appendChild(header);
 
-  if (chapters.length === 0) {
+  if (groups.length === 0) {
     const empty = document.createElement('div');
     empty.textContent = '아직 기록된 내용이 없습니다.';
     Object.assign(empty.style, { color: '#5F574F', fontSize: '12px' });
     popup.appendChild(empty);
   } else {
-    // 챕터 목록 (아코디언)
-    for (const ch of chapters) {
-      const item = document.createElement('div');
-      Object.assign(item.style, {
-        marginBottom: '8px',
-        border: '1px solid #29ADFF',
+    // 2레벨 그룹핑 렌더링
+    for (const grp of groups) {
+      const groupEl = document.createElement('div');
+      Object.assign(groupEl.style, {
+        marginBottom: '10px',
         borderRadius: '4px',
         overflow: 'hidden',
       });
 
-      // 챕터 헤더 (클릭으로 토글)
-      const titleBar = document.createElement('div');
-      Object.assign(titleBar.style, {
-        padding: '8px 12px',
-        background: '#16213E',
+      // 레벨 1: 그룹 헤더 (userMsg 기준, 클릭으로 토글)
+      const groupHeader = document.createElement('div');
+      Object.assign(groupHeader.style, {
+        padding: '9px 12px',
+        background: '#1A1A2E',
+        borderLeft: '3px solid #FF77A8',
         cursor: 'pointer',
         display: 'flex',
         justifyContent: 'space-between',
@@ -1398,109 +1410,201 @@ async function showChrisLogPopup() {
         userSelect: 'none',
       });
 
-      const titleText = document.createElement('span');
-      titleText.textContent = ch.title || '(무제)';
-      Object.assign(titleText.style, {
+      const groupTitle = document.createElement('span');
+      const fullMsg = grp.userMsg.length > 100 ? grp.userMsg.slice(0, 100) + '…' : grp.userMsg;
+      groupTitle.textContent = '👤 ' + grp.userMsg;
+      groupTitle._fullMsg = fullMsg;
+      groupTitle._shortMsg = grp.userMsg;
+      Object.assign(groupTitle.style, {
         color: '#FFF1E8', fontSize: '12px', fontWeight: 'bold',
         flex: '1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       });
 
-      const timeText = document.createElement('span');
-      timeText.textContent = ch.ts || '';
-      Object.assign(timeText.style, {
+      const groupMeta = document.createElement('span');
+      groupMeta.textContent = (grp.ts || '') + (grp.chapters.length > 1 ? '  ' + grp.chapters.length + '건' : '');
+      Object.assign(groupMeta.style, {
         color: '#5F574F', fontSize: '10px', marginLeft: '12px', flexShrink: '0',
       });
 
-      const arrow = document.createElement('span');
-      arrow.textContent = '▸';
-      Object.assign(arrow.style, {
-        color: '#29ADFF', fontSize: '12px', marginLeft: '8px',
+      const groupArrow = document.createElement('span');
+      groupArrow.textContent = '▸';
+      Object.assign(groupArrow.style, {
+        color: '#FF77A8', fontSize: '12px', marginLeft: '8px',
         transition: 'transform 0.2s',
       });
 
-      titleBar.appendChild(titleText);
-      titleBar.appendChild(timeText);
-      titleBar.appendChild(arrow);
+      groupHeader.appendChild(groupTitle);
+      groupHeader.appendChild(groupMeta);
+      groupHeader.appendChild(groupArrow);
 
-      // 챕터 본문 (기본 접힘)
-      const body = document.createElement('div');
-      Object.assign(body.style, {
-        padding: '0 12px',
+      // 레벨 2: 챕터 본문들 (기본 접힘)
+      const groupBody = document.createElement('div');
+      Object.assign(groupBody.style, {
         maxHeight: '0',
         overflow: 'hidden',
-        transition: 'max-height 0.3s ease, padding 0.3s ease',
+        transition: 'max-height 0.3s ease',
         background: '#0F1A33',
       });
 
-      // Thinking 섹션
-      if (ch.thinks && ch.thinks.length > 0) {
-        const thinkHeader = document.createElement('div');
-        thinkHeader.textContent = '💭 Thinking';
-        Object.assign(thinkHeader.style, {
-          color: '#FFEC27', fontSize: '10px', fontWeight: 'bold',
-          marginBottom: '4px', marginTop: '8px',
+      // 각 챕터 내용을 바로 펼쳐서 표시
+      grp.chapters.forEach((ch, idx) => {
+        const chapterEl = document.createElement('div');
+        Object.assign(chapterEl.style, {
+          padding: '10px 14px',
         });
-        body.appendChild(thinkHeader);
 
-        for (const t of ch.thinks) {
-          const thinkLine = document.createElement('div');
-          thinkLine.textContent = t;
-          Object.assign(thinkLine.style, {
-            color: '#C2C3C7', fontSize: '10px', lineHeight: '1.5',
-            paddingLeft: '8px', borderLeft: '2px solid #FFEC27',
-            marginBottom: '3px',
+        // 챕터가 여러 개면 구분선 (첫 번째 제외)
+        if (idx > 0) {
+          const divider = document.createElement('div');
+          Object.assign(divider.style, {
+            borderTop: '1px solid #29ADFF30',
+            marginBottom: '10px',
           });
-          body.appendChild(thinkLine);
+          chapterEl.insertBefore(divider, chapterEl.firstChild);
         }
-      }
 
-      // Response 섹션
-      if (ch.response) {
-        const respHeader = document.createElement('div');
-        respHeader.textContent = '💬 Response';
-        Object.assign(respHeader.style, {
-          color: '#00E436', fontSize: '10px', fontWeight: 'bold',
-          marginBottom: '4px', marginTop: '8px',
-        });
-        body.appendChild(respHeader);
+        // 챕터 타이틀 제거 — userMsg 그룹 헤더로 충분
 
-        const respText = document.createElement('div');
-        respText.textContent = ch.response;
-        Object.assign(respText.style, {
-          color: '#FFF1E8', fontSize: '11px', lineHeight: '1.5',
-          paddingLeft: '8px', borderLeft: '2px solid #00E436',
-        });
-        body.appendChild(respText);
-      }
+        // 💭 Thinking 섹션
+        if (ch.thinks && ch.thinks.length > 0) {
+          const thinkHeader = document.createElement('div');
+          thinkHeader.textContent = '💭 Thinking';
+          Object.assign(thinkHeader.style, {
+            color: '#FFEC27', fontSize: '10px', fontWeight: 'bold',
+            marginBottom: '4px', marginTop: idx === 0 ? '0' : '8px',
+          });
+          chapterEl.appendChild(thinkHeader);
 
-      // Files 섹션
-      if (ch.files && ch.files.length > 0) {
-        const filesDiv = document.createElement('div');
-        filesDiv.textContent = '📁 ' + ch.files.join(', ');
-        Object.assign(filesDiv.style, {
-          color: '#83769C', fontSize: '10px', marginTop: '6px', marginBottom: '8px',
-        });
-        body.appendChild(filesDiv);
-      }
+          for (const t of ch.thinks) {
+            const thinkLine = document.createElement('div');
+            thinkLine.textContent = t;
+            Object.assign(thinkLine.style, {
+              color: '#C2C3C7', fontSize: '10px', lineHeight: '1.5',
+              paddingLeft: '8px', borderLeft: '2px solid #FFEC27',
+              marginBottom: '3px',
+            });
+            chapterEl.appendChild(thinkLine);
+          }
+        }
 
-      // 토글 동작
+        // 💬 Response 섹션
+        if (ch.response) {
+          const respHeader = document.createElement('div');
+          respHeader.textContent = '💬 Response';
+          Object.assign(respHeader.style, {
+            color: '#00E436', fontSize: '10px', fontWeight: 'bold',
+            marginBottom: '4px', marginTop: '8px',
+          });
+          chapterEl.appendChild(respHeader);
+
+          const respText = document.createElement('div');
+          respText.textContent = ch.response;
+          Object.assign(respText.style, {
+            color: '#FFF1E8', fontSize: '11px', lineHeight: '1.5',
+            paddingLeft: '8px', borderLeft: '2px solid #00E436',
+          });
+          chapterEl.appendChild(respText);
+        }
+
+        // 🔧 Tools 섹션 (요약 + 펼침)
+        if (ch.tools && ch.tools.length > 0) {
+          const toolCounts = {};
+          ch.tools.forEach(t => { toolCounts[t.name] = (toolCounts[t.name] || 0) + 1; });
+          const summary = Object.entries(toolCounts).map(([n, c]) => c > 1 ? `${n}×${c}` : n).join(', ');
+
+          const toolWrap = document.createElement('div');
+          Object.assign(toolWrap.style, { marginTop: '6px' });
+
+          const toolHeader = document.createElement('div');
+          toolHeader.textContent = '🔧 ' + summary;
+          Object.assign(toolHeader.style, {
+            color: '#AB5236', fontSize: '10px', cursor: 'pointer', userSelect: 'none',
+          });
+
+          const toolDetail = document.createElement('div');
+          Object.assign(toolDetail.style, { maxHeight: '0', overflow: 'hidden', transition: 'max-height 0.2s ease' });
+          ch.tools.forEach(t => {
+            const line = document.createElement('div');
+            line.textContent = `  ${t.name}${t.detail ? ' → ' + t.detail : ''}`;
+            Object.assign(line.style, { color: '#8E8E8E', fontSize: '9px', paddingLeft: '12px', lineHeight: '1.6' });
+            toolDetail.appendChild(line);
+          });
+
+          toolHeader.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toolDetail.style.maxHeight = toolDetail.style.maxHeight === '0px' ? '200px' : '0px';
+          });
+          toolWrap.appendChild(toolHeader);
+          toolWrap.appendChild(toolDetail);
+          chapterEl.appendChild(toolWrap);
+        }
+
+        // 🤖 Agents 섹션 (요약 + 펼침)
+        if (ch.agents && ch.agents.length > 0) {
+          const agentSummary = ch.agents.map(a => a.type).join(', ');
+
+          const agentWrap = document.createElement('div');
+          Object.assign(agentWrap.style, { marginTop: '4px' });
+
+          const agentHeader = document.createElement('div');
+          agentHeader.textContent = '🤖 ' + agentSummary;
+          Object.assign(agentHeader.style, {
+            color: '#7E2553', fontSize: '10px', cursor: 'pointer', userSelect: 'none',
+          });
+
+          const agentDetail = document.createElement('div');
+          Object.assign(agentDetail.style, { maxHeight: '0', overflow: 'hidden', transition: 'max-height 0.2s ease' });
+          ch.agents.forEach(a => {
+            const line = document.createElement('div');
+            line.textContent = `  ${a.type}${a.desc ? ': ' + a.desc : ''}`;
+            Object.assign(line.style, { color: '#8E8E8E', fontSize: '9px', paddingLeft: '12px', lineHeight: '1.6' });
+            agentDetail.appendChild(line);
+          });
+
+          agentHeader.addEventListener('click', (e) => {
+            e.stopPropagation();
+            agentDetail.style.maxHeight = agentDetail.style.maxHeight === '0px' ? '200px' : '0px';
+          });
+          agentWrap.appendChild(agentHeader);
+          agentWrap.appendChild(agentDetail);
+          chapterEl.appendChild(agentWrap);
+        }
+
+        // 📁 Files 섹션
+        if (ch.files && ch.files.length > 0) {
+          const filesDiv = document.createElement('div');
+          filesDiv.textContent = '📁 ' + ch.files.join(', ');
+          Object.assign(filesDiv.style, {
+            color: '#83769C', fontSize: '10px', marginTop: '6px',
+          });
+          chapterEl.appendChild(filesDiv);
+        }
+
+        groupBody.appendChild(chapterEl);
+      });
+
+      // 그룹 토글 동작
       let isOpen = false;
-      titleBar.addEventListener('click', () => {
+      groupHeader.addEventListener('click', () => {
         isOpen = !isOpen;
         if (isOpen) {
-          body.style.maxHeight = '500px';
-          body.style.padding = '0 12px';
-          arrow.style.transform = 'rotate(90deg)';
+          groupBody.style.maxHeight = grp.chapters.length * 500 + 'px';
+          groupArrow.style.transform = 'rotate(90deg)';
+          groupTitle.textContent = '👤 ' + fullMsg;
+          groupTitle.style.whiteSpace = 'normal';
+          groupTitle.style.overflow = 'visible';
         } else {
-          body.style.maxHeight = '0';
-          body.style.padding = '0 12px';
-          arrow.style.transform = 'rotate(0deg)';
+          groupBody.style.maxHeight = '0';
+          groupArrow.style.transform = 'rotate(0deg)';
+          groupTitle.textContent = '👤 ' + grp.userMsg;
+          groupTitle.style.whiteSpace = 'nowrap';
+          groupTitle.style.overflow = 'hidden';
         }
       });
 
-      item.appendChild(titleBar);
-      item.appendChild(body);
-      popup.appendChild(item);
+      groupEl.appendChild(groupHeader);
+      groupEl.appendChild(groupBody);
+      popup.appendChild(groupEl);
     }
   }
 
