@@ -1045,28 +1045,92 @@ export class Renderer {
   _drawPaperStack(ctx, f) {
     const px = f.x * TS, py = f.y * TS;
     const pw = f.w * TS, ph = f.h * TS;
-    // 마닐라 폴더 3개 스택 (색깔 탭이 삐죽 나온 서류 폴더)
-    const folders = [
-      { color: '#D4A862', tab: '#E53E3E', offX: 0, offY: 4 },
-      { color: '#C89B50', tab: '#3182CE', offX: 2, offY: 2 },
-      { color: '#DEBB78', tab: '#38A169', offX: 1, offY: 0 },
-    ];
-    for (const fd of folders) {
-      const fx = px + fd.offX, fy = py + fd.offY;
-      const fw = pw - 4, fh = ph - 5;
-      // 폴더 본체
-      ctx.fillStyle = fd.color;
-      ctx.fillRect(fx, fy + 3, fw, fh);
-      // 폴더 상단 접힌 부분
-      ctx.fillStyle = fd.color;
-      ctx.fillRect(fx, fy + 2, fw * 0.6, 3);
-      // 색깔 탭 (폴더 오른쪽에 삐죽)
-      ctx.fillStyle = fd.tab;
-      ctx.fillRect(fx + fw - 3, fy, 3, 4);
-      // 폴더 아래쪽 그림자
-      ctx.fillStyle = 'rgba(0,0,0,0.1)';
-      ctx.fillRect(fx, fy + fh + 1, fw, 1);
+    // 펼쳐진 두꺼운 노트 (38×26px, 3/4 등각 뷰)
+    // 페이지 굴곡을 gradient로 표현: spine 근처 어둡고 바깥 밝게 = 페이지가 위로 들린 느낌
+    const bw = pw - 2, bh = ph - 2;
+    const ox = px + 1, oy = py;
+    const thick = 4;
+    const halfW = Math.floor((bw - 2) / 2);
+    const pageH = bh - thick - 4;
+    const spineX = ox + halfW + 1;
+
+    // ── 그림자 (책 아래) ──
+    ctx.fillStyle = 'rgba(0,0,0,0.10)';
+    ctx.fillRect(ox + 2, oy + bh - 1, bw - 2, 2);
+
+    // ── 앞면: 페이지 두께 (등각 깊이) ──
+    // spine 쪽이 움푹 들어간 느낌: 가운데 어둡고 양끝 밝게
+    for (let x = 0; x < bw; x++) {
+      const distFromCenter = Math.abs(x - bw / 2) / (bw / 2);
+      const brightness = Math.floor(215 + distFromCenter * 25); // 215~240
+      const r = brightness, g = Math.floor(brightness * 0.95), b = Math.floor(brightness * 0.88);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(ox + x, oy + bh - thick, 1, thick - 1);
     }
+    // 페이지 줄 (단면의 종이 겹)
+    ctx.fillStyle = 'rgba(0,0,0,0.05)';
+    for (let i = 0; i < thick - 1; i += 2) {
+      ctx.fillRect(ox, oy + bh - thick + i, bw, 1);
+    }
+
+    // ── 커버 테두리 (갈색 가죽) ──
+    ctx.fillStyle = '#5C3D1E';
+    ctx.fillRect(ox, oy, bw, bh - thick);
+    ctx.fillStyle = '#6B4A28';
+    ctx.fillRect(ox + 1, oy + 1, bw - 2, bh - thick - 2);
+
+    // ── 왼쪽 페이지 (gradient: spine쪽 어둡고 바깥 밝게 = 곡면) ──
+    const lgL = ctx.createLinearGradient(ox + 2, 0, spineX - 1, 0);
+    lgL.addColorStop(0, '#FFFDF8');    // 바깥: 밝고 살짝 들린
+    lgL.addColorStop(0.7, '#FFF8EE');  // 중간
+    lgL.addColorStop(1, '#EDE4D4');    // spine 근처: 어두움 (접힌 그림자)
+    ctx.fillStyle = lgL;
+    ctx.fillRect(ox + 2, oy + 2, halfW - 1, pageH);
+
+    // 왼쪽 페이지 가장자리 하이라이트 (종이 끝 말린 느낌)
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillRect(ox + 2, oy + 2, 1, pageH);
+    // 왼쪽 상단 모서리 하이라이트
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillRect(ox + 2, oy + 2, halfW - 1, 1);
+
+    // ── 오른쪽 페이지 (gradient: spine쪽 어둡고 바깥 밝게) ──
+    const lgR = ctx.createLinearGradient(spineX + 2, 0, ox + bw - 2, 0);
+    lgR.addColorStop(0, '#EDE4D4');    // spine 근처
+    lgR.addColorStop(0.3, '#FFF8EE');
+    lgR.addColorStop(1, '#FFFDF8');    // 바깥: 밝게
+    ctx.fillStyle = lgR;
+    ctx.fillRect(spineX + 2, oy + 2, halfW - 1, pageH);
+
+    // 오른쪽 페이지 가장자리 하이라이트
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillRect(ox + bw - 3, oy + 2, 1, pageH);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillRect(spineX + 2, oy + 2, halfW - 1, 1);
+
+    // ── spine (V자 접힌 부분, 어두운 골) ──
+    ctx.fillStyle = '#A89878';
+    ctx.fillRect(spineX, oy + 1, 1, bh - thick - 2);
+    ctx.fillStyle = '#C0B098';
+    ctx.fillRect(spineX + 1, oy + 1, 1, bh - thick - 2);
+
+    // ── 텍스트 줄 (왼쪽, 연한 잉크) ──
+    ctx.fillStyle = 'rgba(50,50,70,0.13)';
+    for (let i = 0; i < 4 && i * 3 + 2 < pageH; i++) {
+      const lw = halfW - 5 - (i === 3 ? 4 : 0); // 마지막 줄 짧게
+      ctx.fillRect(ox + 4, oy + 4 + i * 3, lw, 1);
+    }
+    // ── 텍스트 줄 (오른쪽) ──
+    for (let i = 0; i < 4 && i * 3 + 2 < pageH; i++) {
+      const lw = halfW - 5 - (i === 2 ? 3 : 0);
+      ctx.fillRect(spineX + 4, oy + 4 + i * 3, lw, 1);
+    }
+
+    // ── 북마크 리본 (빨간색, 상단에서 삐죽) ──
+    ctx.fillStyle = '#CC3333';
+    ctx.fillRect(ox + bw - 5, oy - 2, 2, 5);
+    ctx.fillStyle = '#AA2222';
+    ctx.fillRect(ox + bw - 5, oy + 2, 1, 1); // 리본 끝 그림자
   }
 
   _drawFurniture(ctx, f, activeTools, workInfoMap, activeAgents) {

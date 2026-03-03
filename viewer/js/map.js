@@ -73,7 +73,7 @@ export const furniture = [
   { type: 'leadChair', x: 9.05, y: 9.0, w: 0.8, h: 0.8 },
   { type: 'leadDesk', x: 8, y: 10, w: 3, h: 1 },
   { type: 'monitor', x: 9.1, y: 10, w: 0.8, h: 0.3, back: true },
-  { type: 'paperStack', x: 10.3, y: 10.1, w: 0.6, h: 0.4 },
+  { type: 'paperStack', x: 10.2, y: 10.05, w: 0.8, h: 0.55 },
 
   // ═══ TOP DECORATIONS ═══
   { type: 'plant', x: 4, y: 5, w: 1, h: 1 },
