@@ -62,7 +62,12 @@ export class Renderer {
     this.floorCanvas = null;
     this.connectionStatus = 'connecting';
     this.tick = 0;
+    this._dashboardData = null;
     this._initFloor();
+  }
+
+  setDashboardData(data) {
+    this._dashboardData = data;
   }
 
   _initFloor() {
@@ -493,6 +498,223 @@ export class Renderer {
     ctx.fillStyle = '#38A169'; ctx.fillRect(x + 30, y + h - 11, 5, 6);
   }
 
+  _drawDashboardBoard(ctx, f, dashboardData) {
+    const x = f.x * TS, y = f.y * TS;
+    const w = f.w * TS, h = f.h * TS;
+
+    // 그림자
+    ctx.fillStyle = PAL.shadow;
+    ctx.fillRect(x + 5, y + 5, w - 3, h - 3);
+
+    // 프레임 (나무)
+    ctx.fillStyle = '#8B6914';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = '#A07D1A';
+    ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
+
+    // 화이트 배경
+    ctx.fillStyle = '#F0F4F8';
+    ctx.fillRect(x + 5, y + 5, w - 10, h - 10);
+
+    // 상단 프레임 하이라이트
+    ctx.fillStyle = '#B8960F';
+    ctx.fillRect(x + 2, y + 2, w - 4, 2);
+
+    const data = dashboardData || { tasks: [], usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, contextWindow: 0 } };
+    const innerX = x + 8;
+    const innerY = y + 8;
+    const innerW = w - 16;
+    const innerH = h - 20;
+
+    // ═══ 섹션 제목들 ═══
+    ctx.font = '14px "Menlo", "Consolas", monospace';
+    ctx.textAlign = 'left';
+
+    // "TASKS" 헤더
+    ctx.fillStyle = '#1A202C';
+    ctx.fillText('TASKS', innerX, innerY + 8);
+
+    // 🔄 Clear 버튼 (TASKS 헤더 오른쪽, 미니멀 필 버튼)
+    const clearBtnW = 54, clearBtnH = 14;
+    const clearBtnX = innerX + innerW - clearBtnW;
+    const clearBtnY = innerY - 2;
+    const mx = this._hoverMouse?.x || -1, my = this._hoverMouse?.y || -1;
+    const clearHover = mx >= clearBtnX && mx < clearBtnX + clearBtnW && my >= clearBtnY && my < clearBtnY + clearBtnH;
+
+    // 둥근 필 버튼
+    const cr = 4;
+    ctx.beginPath();
+    ctx.moveTo(clearBtnX + cr, clearBtnY);
+    ctx.lineTo(clearBtnX + clearBtnW - cr, clearBtnY);
+    ctx.quadraticCurveTo(clearBtnX + clearBtnW, clearBtnY, clearBtnX + clearBtnW, clearBtnY + cr);
+    ctx.lineTo(clearBtnX + clearBtnW, clearBtnY + clearBtnH - cr);
+    ctx.quadraticCurveTo(clearBtnX + clearBtnW, clearBtnY + clearBtnH, clearBtnX + clearBtnW - cr, clearBtnY + clearBtnH);
+    ctx.lineTo(clearBtnX + cr, clearBtnY + clearBtnH);
+    ctx.quadraticCurveTo(clearBtnX, clearBtnY + clearBtnH, clearBtnX, clearBtnY + clearBtnH - cr);
+    ctx.lineTo(clearBtnX, clearBtnY + cr);
+    ctx.quadraticCurveTo(clearBtnX, clearBtnY, clearBtnX + cr, clearBtnY);
+    ctx.closePath();
+    ctx.fillStyle = clearHover ? '#E53E3E' : '#E8ECEF';
+    ctx.fill();
+    ctx.strokeStyle = clearHover ? '#C53030' : '#CBD5E0';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // 텍스트
+    ctx.fillStyle = clearHover ? '#FFF' : '#718096';
+    ctx.font = '9px "Menlo", "Consolas", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('REFRESH', clearBtnX + clearBtnW / 2, clearBtnY + 10);
+    ctx.textAlign = 'left';
+
+    this._clearBtnHitbox = { x: clearBtnX, y: clearBtnY, w: clearBtnW, h: clearBtnH };
+
+    // ═══ 칸반 보드 (3칼럼, 전체 너비 사용) ═══
+    const kanbanX = innerX;
+    const kanbanY = innerY + 20;
+    const kanbanW = innerW; // 전체 너비 사용
+    const kanbanH = innerH - 26;
+    const colW = Math.floor(kanbanW / 3);
+
+    // 태스크 분류
+    const pending = data.tasks.filter(t => t.status === 'pending');
+    const doing = data.tasks.filter(t => t.status === 'in_progress');
+    const done = data.tasks.filter(t => t.status === 'completed');
+
+    // 칼럼 설정
+    const colColors = ['#E8ECEF', '#DBEAFE', '#DCFCE7'];
+    const colHeaders = ['TODO', 'DOING', 'DONE'];
+    const colHeaderColors = ['#6B7280', '#3B82F6', '#22C55E'];
+    const colTextColors = ['#4B5563', '#2563EB', '#16A34A'];
+    const taskLists = [pending, doing, done];
+
+    // 칼럼별 독립 스크롤 초기화
+    if (!this._dashboardScrollYs) this._dashboardScrollYs = [0, 0, 0];
+    // 칼럼 경계 저장 (wheel 이벤트에서 사용)
+    this._dashboardCols = { kanbanX, colW, kanbanY, kanbanH };
+
+    // hitbox 초기화
+    this._taskHitboxes = [];
+
+    for (let i = 0; i < 3; i++) {
+      const cx = kanbanX + i * colW;
+
+      // 칼럼 클리핑 영역
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(cx + 1, kanbanY, colW - 2, kanbanH);
+      ctx.clip();
+
+      // 칼럼 배경
+      ctx.fillStyle = colColors[i];
+      ctx.fillRect(cx + 1, kanbanY, colW - 2, kanbanH);
+
+      // 칼럼 헤더 + 카운트 (스크롤과 무관하게 고정)
+      ctx.restore();
+      ctx.save();
+      ctx.fillStyle = colHeaderColors[i];
+      ctx.font = 'bold 11px "Menlo", "Consolas", monospace';
+      ctx.fillText(`${colHeaders[i]} (${taskLists[i].length})`, cx + 4, kanbanY + 12);
+
+      // 태스크 내용 클리핑
+      ctx.beginPath();
+      ctx.rect(cx + 1, kanbanY + 16, colW - 2, kanbanH - 16);
+      ctx.clip();
+
+      // 태스크 이름 리스트 (줄바꿈 지원)
+      ctx.font = '10px "Menlo", "Consolas", monospace';
+      const lineH = 13;
+      const taskPadX = 13;
+      const textMaxW = colW - taskPadX - 6;
+
+      let taskOffsetY = kanbanY + 26 - (this._dashboardScrollYs[i] || 0);
+
+      for (let j = 0; j < taskLists[i].length; j++) {
+        const task = taskLists[i][j];
+
+        // 텍스트 줄바꿈 계산 (measureText로 정확한 폭 측정)
+        const rawName = task.subject || task.description || '...';
+        const wrappedLines = [];
+        let line = '';
+        for (const ch of rawName) {
+          const test = line + ch;
+          if (ctx.measureText(test).width > textMaxW && line.length > 0) {
+            wrappedLines.push(line);
+            line = ch;
+          } else {
+            line = test;
+          }
+        }
+        if (line) wrappedLines.push(line);
+        // 최대 3줄, 넘으면 ...
+        if (wrappedLines.length > 3) {
+          wrappedLines.length = 3;
+          wrappedLines[2] = wrappedLines[2].slice(0, -1) + '…';
+        }
+
+        const taskH = wrappedLines.length * lineH + 4;
+
+        // 화면 범위 내인 경우만 그리기
+        if (taskOffsetY + taskH > kanbanY + 16 && taskOffsetY < kanbanY + kanbanH) {
+          // 호버 하이라이트 (은괴 반짝임)
+          const hm = this._hoverMouse;
+          if (hm && hm.x >= cx + 1 && hm.x <= cx + colW - 1 && hm.y >= taskOffsetY && hm.y <= taskOffsetY + taskH) {
+            const shimmer = 0.18 + 0.12 * Math.sin(this.tick * 0.12);
+            // 배경 하이라이트
+            ctx.fillStyle = `rgba(200,220,255,${shimmer})`;
+            ctx.fillRect(cx + 2, taskOffsetY - 1, colW - 4, taskH + 2);
+            // 테두리 글로우
+            ctx.strokeStyle = `rgba(100,180,255,${shimmer + 0.15})`;
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(cx + 2, taskOffsetY - 1, colW - 4, taskH + 2);
+          }
+
+          // 상태 도트
+          const dotColor = task.error ? '#EF4444' : colHeaderColors[i];
+          ctx.fillStyle = dotColor;
+          ctx.beginPath();
+          ctx.arc(cx + 7, taskOffsetY + 7, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+
+          // 에러 깜빡임
+          if (task.error && this.tick % 40 < 20) {
+            ctx.fillStyle = '#EF4444';
+            ctx.beginPath();
+            ctx.arc(cx + 7, taskOffsetY + 7, 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          // 줄바꿈 텍스트 렌더링
+          ctx.fillStyle = task.error ? '#DC2626' : colTextColors[i];
+          for (let li = 0; li < wrappedLines.length; li++) {
+            ctx.fillText(wrappedLines[li], cx + taskPadX, taskOffsetY + 9 + li * lineH);
+          }
+
+          // hitbox 저장 (스크린 좌표 기준)
+          this._taskHitboxes.push({
+            task,
+            x: cx + 1,
+            y: taskOffsetY,
+            w: colW - 2,
+            h: taskH,
+          });
+        }
+
+        taskOffsetY += taskH + 2;
+      }
+
+      ctx.restore();
+    }
+
+    // 마커 트레이 (하단 장식)
+    ctx.fillStyle = '#A0AEC0';
+    ctx.fillRect(x + 8, y + h - 12, w - 16, 6);
+    ctx.fillStyle = '#E53E3E'; ctx.fillRect(x + 14, y + h - 11, 4, 4);
+    ctx.fillStyle = '#3182CE'; ctx.fillRect(x + 22, y + h - 11, 4, 4);
+    ctx.fillStyle = '#38A169'; ctx.fillRect(x + 30, y + h - 11, 4, 4);
+    ctx.fillStyle = '#D69E2E'; ctx.fillRect(x + 38, y + h - 11, 4, 4);
+  }
+
   _drawWaterCooler(ctx, f) {
     const x = f.x * TS, y = f.y * TS;
 
@@ -820,6 +1042,33 @@ export class Renderer {
     ctx.fillRect(x + 8, y, w - 16, 3);
   }
 
+  _drawPaperStack(ctx, f) {
+    const px = f.x * TS, py = f.y * TS;
+    const pw = f.w * TS, ph = f.h * TS;
+    // 마닐라 폴더 3개 스택 (색깔 탭이 삐죽 나온 서류 폴더)
+    const folders = [
+      { color: '#D4A862', tab: '#E53E3E', offX: 0, offY: 4 },
+      { color: '#C89B50', tab: '#3182CE', offX: 2, offY: 2 },
+      { color: '#DEBB78', tab: '#38A169', offX: 1, offY: 0 },
+    ];
+    for (const fd of folders) {
+      const fx = px + fd.offX, fy = py + fd.offY;
+      const fw = pw - 4, fh = ph - 5;
+      // 폴더 본체
+      ctx.fillStyle = fd.color;
+      ctx.fillRect(fx, fy + 3, fw, fh);
+      // 폴더 상단 접힌 부분
+      ctx.fillStyle = fd.color;
+      ctx.fillRect(fx, fy + 2, fw * 0.6, 3);
+      // 색깔 탭 (폴더 오른쪽에 삐죽)
+      ctx.fillStyle = fd.tab;
+      ctx.fillRect(fx + fw - 3, fy, 3, 4);
+      // 폴더 아래쪽 그림자
+      ctx.fillStyle = 'rgba(0,0,0,0.1)';
+      ctx.fillRect(fx, fy + fh + 1, fw, 1);
+    }
+  }
+
   _drawFurniture(ctx, f, activeTools, workInfoMap, activeAgents) {
     let toolColor = null;
     let workInfo = null;
@@ -836,6 +1085,7 @@ export class Renderer {
       case 'plant':      this._drawPlant(ctx, f); break;
       case 'coffee':     this._drawCoffee(ctx, f); break;
       case 'whiteboard': this._drawWhiteboard(ctx, f, activeAgents); break;
+      case 'dashboardBoard': this._drawDashboardBoard(ctx, f, this._dashboardData); break;
       case 'water':      this._drawWaterCooler(ctx, f); break;
       case 'bookshelf':  this._drawBookshelf(ctx, f); break;
       case 'sofa':       this._drawSofa(ctx, f); break;
@@ -845,6 +1095,7 @@ export class Renderer {
       case 'bossDesk':   this._drawBossDesk(ctx, f); break;
       case 'bossChair':  this._drawBossChair(ctx, f); break;
       case 'leadChair':  this._drawChair(ctx, f); break;
+      case 'paperStack': this._drawPaperStack(ctx, f); break;
     }
   }
 
@@ -856,6 +1107,10 @@ export class Renderer {
     // Chairs sort by top edge so characters render ON TOP of them
     if (f.type === 'chair' || f.type === 'leadChair' || f.type === 'bossChair') {
       return f.y * TS;
+    }
+    // paperStack renders ON TOP of desk (after desk in sort order)
+    if (f.type === 'paperStack') {
+      return (f.y + f.h) * TS + TS;
     }
     return (f.y + f.h) * TS;
   }
@@ -904,6 +1159,24 @@ export class Renderer {
     // Work indicator (tool + file + elapsed)
     if (char.isWorking && char.workTool) {
       this._drawWorkIndicator(ctx, char);
+    }
+
+    // Thinking indicator (Chris 전용)
+    if (char._isThinking && char.name === 'Chris') {
+      const pulse = 0.5 + 0.5 * Math.sin(this.tick * 0.08);
+      ctx.globalAlpha = 0.6 + 0.4 * pulse;
+      ctx.font = '12px "Menlo", "Consolas", monospace';
+      ctx.textAlign = 'center';
+      const thinkLabel = '💭 thinking...';
+      const tw = ctx.measureText(thinkLabel).width + 10;
+      const tx = char.x - tw / 2, ty = char.y - 48;
+      ctx.fillStyle = `rgba(255,236,39,${0.15 + 0.1 * pulse})`;
+      this._roundRect(ctx, tx, Math.max(2, ty), tw, 16, 3);
+      ctx.fill();
+      ctx.fillStyle = '#FFEC27';
+      ctx.fillText(thinkLabel, char.x, Math.max(5, ty + 3));
+      ctx.textAlign = 'left';
+      ctx.globalAlpha = 1;
     }
 
     // Name tag
@@ -1069,8 +1342,9 @@ export class Renderer {
 
     ctx.font = '14px "Menlo", "Consolas", monospace';
     ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
     ctx.fillStyle = '#29ADFF';
-    ctx.fillText('BACKSTAGE', pad + 6, pad + 16);
+    ctx.fillText('BACKSTAGE', pad + 6, pad + 12);
 
     const dotColors = { connected: '#68D391', connecting: '#ECC94B', disconnected: '#FC8181' };
     ctx.fillStyle = dotColors[this.connectionStatus] || dotColors.connecting;
@@ -1078,29 +1352,138 @@ export class Renderer {
     ctx.arc(pad + 164, pad + 12, 3, 0, Math.PI * 2);
     ctx.fill();
 
-    // ─── Top right: agent stats ───
+    // ─── Top right: CTX progress bar + agent stats ───
     ctx.font = '12px "Menlo", "Consolas", monospace';
     const cTeamText = stats.cTeamActive > 0 ? `  [C]: ${stats.cTeamActive}` : '';
     const statsText = `Active: ${stats.active}/${stats.total}  Idle: ${stats.idle}  Done: ${stats.tasksCompleted}${cTeamText}`;
-    const sw = ctx.measureText(statsText).width + 12;
+
+    // CTX 프로그레스바 수치 계산 (현재 컨텍스트 윈도우 크기)
+    const maxCtx = 200000;
+    const ctxData = this._dashboardData && this._dashboardData.usage ? this._dashboardData.usage : {};
+    const ctxUsed = ctxData.lastTurnContext || ctxData.contextWindow || 0;
+    const fillRatio = Math.min(1, ctxUsed / maxCtx);
+    const formatK = (n) => {
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return Math.round(n / 1000) + 'K';
+      return String(n);
+    };
+    const ctxLabel = formatK(ctxUsed);
+    const ctxLabelW = ctx.measureText(' ' + ctxLabel).width;
+    const barW = 100;
+    const barH = 10;
+    const usageBarW = 100;
+    // Usage 계산 (input + cache_read + output = 실제 총 토큰 사용량)
+    const usageTotal = (ctxData.inputTokens || 0) + (ctxData.cacheReadTokens || 0) + (ctxData.outputTokens || 0);
+    const maxUsage = 50_000_000; // 50M (5h rate limit 기준)
+    const usageRatio = Math.min(1, usageTotal / maxUsage);
+    const usageLabel = formatK(usageTotal);
+    const usageLabelW = ctx.measureText(' ' + usageLabel).width;
+
+    const statsW = ctx.measureText(statsText).width + 12;
+    const ctxBarTotalW = barW + ctxLabelW + 6;
+    const usageBarTotalW = usageBarW + usageLabelW + 6;
+    const totalRightW = ctxBarTotalW + 6 + usageBarTotalW + 8 + statsW;
+
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    this._roundRect(ctx, MAP_W - sw - pad, pad, sw, 24, 4);
+    this._roundRect(ctx, MAP_W - totalRightW - pad, pad, totalRightW, 24, 4);
     ctx.fill();
 
+    // CTX 프로그레스바 그리기
+    const barX = MAP_W - totalRightW - pad + 6;
+    const barY = pad + 7;
+
+    // 배경
+    ctx.fillStyle = '#2D3748';
+    ctx.fillRect(barX, barY, barW, barH);
+
+    // 채우기 (초록→노랑→빨강 그라데이션)
+    const fillW = Math.floor(barW * fillRatio);
+    if (fillW > 0) {
+      for (let px = 0; px < fillW; px++) {
+        const ratio = px / barW;
+        let r, g, b;
+        if (ratio < 0.5) {
+          const t = ratio * 2;
+          r = Math.floor(34 + t * (255 - 34));
+          g = Math.floor(197 + t * (236 - 197));
+          b = Math.floor(94 - t * 94);
+        } else {
+          const t = (ratio - 0.5) * 2;
+          r = 255;
+          g = Math.floor(236 - t * 236);
+          b = 0;
+        }
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(barX + px, barY, 1, barH);
+      }
+    }
+
+    // CTX 바 가운데 라벨 (아웃라인)
+    ctx.font = '8px "Menlo", "Consolas", monospace';
+    ctx.textAlign = 'center';
+    const ctxCenterX = barX + barW / 2;
+    ctx.strokeStyle = '#1A202C';
+    ctx.lineWidth = 2.5;
+    ctx.strokeText('CTX', ctxCenterX, pad + 12);
+    ctx.fillStyle = '#E2E8F0';
+    ctx.fillText('CTX', ctxCenterX, pad + 12);
+    ctx.lineWidth = 1;
+    // CTX 수치 레이블
+    ctx.fillStyle = '#A0AEC0';
+    ctx.font = '10px "Menlo", "Consolas", monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(' ' + ctxLabel, barX + barW, pad + 12);
+
+    // ─── Usage 프로그래스바 ───
+    const usageBarX = barX + barW + ctxLabelW + 12;
+    // 배경
+    ctx.fillStyle = '#2D3748';
+    ctx.fillRect(usageBarX, barY, usageBarW, barH);
+    // 채우기 (파란→보라 그라데이션)
+    const usageFillW = Math.floor(usageBarW * usageRatio);
+    if (usageFillW > 0) {
+      for (let px = 0; px < usageFillW; px++) {
+        const ratio = px / usageBarW;
+        const r = Math.floor(41 + ratio * (180 - 41));
+        const g = Math.floor(128 + ratio * (80 - 128));
+        const b = Math.floor(255 - ratio * 50);
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(usageBarX + px, barY, 1, barH);
+      }
+    }
+    // 바 가운데 "usage" 텍스트 (항상 보이게: 텍스트 아웃라인)
+    ctx.font = '8px "Menlo", "Consolas", monospace';
+    ctx.textAlign = 'center';
+    const usageCenterX = usageBarX + usageBarW / 2;
+    ctx.strokeStyle = '#1A202C';
+    ctx.lineWidth = 2.5;
+    ctx.strokeText('USAGE', usageCenterX, pad + 12);
+    ctx.fillStyle = '#E2E8F0';
+    ctx.fillText('USAGE', usageCenterX, pad + 12);
+    ctx.lineWidth = 1;
+    // Usage 수치 레이블
+    ctx.font = '10px "Menlo", "Consolas", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#A0AEC0';
+    ctx.fillText(' ' + usageLabel, usageBarX + usageBarW, pad + 12);
+
+    // 에이전트 통계 텍스트
+    ctx.font = '12px "Menlo", "Consolas", monospace';
     ctx.fillStyle = stats.active > 0 ? '#68D391' : '#718096';
     ctx.textAlign = 'right';
-    ctx.fillText(statsText, MAP_W - pad - 6, pad + 16);
+    ctx.fillText(statsText, MAP_W - pad - 6, pad + 12);
     ctx.textAlign = 'left';
 
     // ─── Bottom: active agents bar with task description + elapsed ───
     if (stats.active > 0) {
       const activeAgents = characters.getActiveAgents();
       let bx = pad + 6;
-      const by = MAP_H - pad - 2;
+      const by = MAP_H - pad - 28;
 
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       const barW = Math.min(activeAgents.length * 200 + 10, MAP_W - pad * 2);
-      this._roundRect(ctx, pad, by - 2, barW, 28, 4);
+      this._roundRect(ctx, pad, by, barW, 24, 4);
       ctx.fill();
 
       ctx.font = '12px "Menlo", "Consolas", monospace';
@@ -1122,12 +1505,14 @@ export class Renderer {
         }
 
         ctx.fillStyle = color;
-        ctx.fillText(label, bx, by + 16);
+        ctx.fillText(label, bx, by + 12);
         bx += ctx.measureText(label).width + 14;
 
         if (bx > MAP_W - 20) break;
       }
     }
+
+    ctx.textBaseline = 'alphabetic';
   }
 
   // Room labels (subtle)

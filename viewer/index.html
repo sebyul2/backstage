@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Backstage v2.5</title>
-<link rel="stylesheet" href="/css/game.css?v=2.5">
+<link rel="stylesheet" href="/css/game.css?v=2.6">
 <script src="/js/lib/matter.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
 function fitViewport() {
   var app = document.getElementById('app');
@@ -53,7 +54,7 @@ document.addEventListener('DOMContentLoaded', fitViewport);
   };
 
   try {
-    await import('./js/main.js?v=2.5');
+    await import('./js/main.js?v=2.6');
   } catch (e) {
     document.getElementById('loading').innerHTML =
       `<div style="color:#FC8181;font-size:14px;padding:20px;">

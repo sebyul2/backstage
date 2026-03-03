@@ -33,9 +33,9 @@ export const groundMap = [
   // Row 1 (boss desk)
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
   // Row 2 (boss chair + rug)
-  [1,0,0,0,0,0,3,3,3,3,3,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3,0,1,1,4,4,4,4,4,4,4,4,4,1],
   // Row 3 (rug + decorations)
-  [1,0,0,0,0,0,3,3,3,3,3,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3,0,1,1,4,4,4,4,4,4,4,4,4,1],
   // Row 4 (lead desk)
   [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,4,4,4,1],
   // Row 5 (lead chair)
@@ -64,19 +64,21 @@ export const groundMap = [
 // x,y in tile coords; w,h in tiles
 export const furniture = [
   // ═══ BOSS DESK (Player - CEO) — top of office ═══
-  { type: 'bossChair', x: 7.9, y: 1.4, w: 1.2, h: 1.2 },
-  { type: 'bossDesk', x: 7, y: 3, w: 3, h: 1 },
-  { type: 'monitor', x: 7.5, y: 3, w: 0.6, h: 0.3, back: true },
-  { type: 'monitor', x: 8.8, y: 3, w: 0.6, h: 0.3, back: true },
+  { type: 'bossChair', x: 14.0, y: 1.4, w: 1.2, h: 1.2 },
+  { type: 'bossDesk', x: 13, y: 2, w: 3, h: 1 },
+  { type: 'monitor', x: 13.5, y: 2, w: 0.6, h: 0.3, back: true },
+  { type: 'monitor', x: 14.8, y: 2, w: 0.6, h: 0.3, back: true },
 
   // ═══ LEAD DESK (Chris - Team Lead) — middle ═══
-  { type: 'leadChair', x: 8.05, y: 4.85, w: 0.8, h: 0.8 },
-  { type: 'leadDesk', x: 7, y: 6, w: 3, h: 1 },
-  { type: 'monitor', x: 8.1, y: 6, w: 0.8, h: 0.3, back: true },
+  { type: 'leadChair', x: 9.05, y: 9.0, w: 0.8, h: 0.8 },
+  { type: 'leadDesk', x: 8, y: 10, w: 3, h: 1 },
+  { type: 'monitor', x: 9.1, y: 10, w: 0.8, h: 0.3, back: true },
+  { type: 'paperStack', x: 10.3, y: 10.1, w: 0.6, h: 0.4 },
 
   // ═══ TOP DECORATIONS ═══
-  { type: 'plant', x: 4, y: 2, w: 1, h: 1 },
-  { type: 'plant', x: 12, y: 2, w: 1, h: 1 },
+  { type: 'plant', x: 4, y: 5, w: 1, h: 1 },
+  { type: 'plant', x: 12, y: 5, w: 1, h: 1 },
+  { type: 'plant', x: 16, y: 4, w: 1, h: 1 },
   { type: 'water', x: 17, y: 6, w: 1, h: 1 },
 
   // ═══ [C] TEAM DESKS (LEFT side, rows 8+11) ═══
@@ -109,8 +111,10 @@ export const furniture = [
 
   // ═══ SEPARATOR (row 10) ═══
   { type: 'plant', x: 4, y: 10, w: 1, h: 1 },
-  { type: 'whiteboard', x: 8, y: 10, w: 2, h: 1 },
   { type: 'plant', x: 14, y: 10, w: 1, h: 1 },
+
+  // ═══ DASHBOARD BOARD (left wall, rows 5-6) ═══
+  { type: 'dashboardBoard', x: 1, y: 1, w: 11, h: 4 },
 
   // ═══ AGENT DESKS (RIGHT side, rows 8+11) ═══
   // Row 8 top (facing DOWN)
@@ -176,7 +180,7 @@ for (let r = 0; r < MAP_ROWS; r++) {
 }
 
 // Furniture collision
-const BLOCKING_FURNITURE = ['desk', 'leadDesk', 'bossDesk', 'plant', 'coffee', 'whiteboard', 'water', 'bookshelf', 'sofa', 'breakTable', 'vending'];
+const BLOCKING_FURNITURE = ['desk', 'leadDesk', 'bossDesk', 'plant', 'coffee', 'dashboardBoard', 'water', 'bookshelf', 'sofa', 'breakTable', 'vending'];
 for (const f of furniture) {
   if (!BLOCKING_FURNITURE.includes(f.type)) continue;
   const x0 = Math.floor(f.x);
@@ -205,7 +209,7 @@ export function isPixelWalkable(px, py) {
 
 // Desk positions (pixel coords) — where agents SIT when working
 export const deskPositions = {
-  'Chris':   { x: 8.5 * TILE_SIZE, y: 5.5 * TILE_SIZE, dir: 0 },
+  'Chris':   { x: 9.5 * TILE_SIZE, y: 9.5 * TILE_SIZE, dir: 0 },
   // [C] Team LEFT — top row 8 (face DOWN) + bottom row 11 (face UP)
   'Mia':  { x: 2.5 * TILE_SIZE, y: 7.85 * TILE_SIZE, dir: 0 },
   'Kai':  { x: 3.5 * TILE_SIZE, y: 7.85 * TILE_SIZE, dir: 0 },
@@ -259,4 +263,4 @@ export const furnitureInteractions = [
 ];
 
 // Player spawn position (at boss desk — top of office)
-export const playerSpawn = { x: 8.5 * TILE_SIZE, y: 2.5 * TILE_SIZE };
+export const playerSpawn = { x: 14.5 * TILE_SIZE, y: 1.5 * TILE_SIZE };

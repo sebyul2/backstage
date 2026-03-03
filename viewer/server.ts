@@ -1,12 +1,13 @@
 import { homedir } from "os";
 import * as path from "path";
 import * as fs from "fs";
-import Anthropic from '@anthropic-ai/sdk';
 
 const PLUGIN_DIR = path.join(homedir(), ".claude/plugins/backstage");
 const HISTORY_FILE =
   process.env.BACKSTAGE_HISTORY ||
   path.join(PLUGIN_DIR, "history.jsonl");
+
+const CHRIS_LOG_FILE = path.join(PLUGIN_DIR, "chris-log.jsonl");
 
 const CHARACTERS_FILE = (() => {
   const local = path.join(import.meta.dir, "../hooks/characters.json");
@@ -30,52 +31,57 @@ const MIME_TYPES: Record<string, string> = {
 
 const PORT = Number(process.env.BACKSTAGE_PORT) || 7777;
 
-let anthropicClient: Anthropic | null = null;
-try {
-    if (process.env.ANTHROPIC_API_KEY) {
-        anthropicClient = new Anthropic();
-    }
-} catch {}
-
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// ─── Agent name mapping ─────────────────────────────────────────
-const AGENT_NAMES: Record<string, string> = {
-  // ─── Jake: 탐색 ───
-  'explore': 'Jake', 'explore-medium': 'Jake',
-  'oh-my-claudecode:explore': 'Jake', 'oh-my-claudecode:explore-medium': 'Jake',
-  // ─── David: 아키텍트/자문 ───
-  'oracle': 'David', 'oracle-medium': 'David', 'oracle-low': 'David',
-  'oh-my-claudecode:architect': 'David',
-  // ─── Kevin: 실행 ───
-  'sisyphus-junior': 'Kevin', 'sisyphus-junior-low': 'Kevin', 'sisyphus-junior-high': 'Kevin',
-  'oh-my-claudecode:executor': 'Kevin', 'oh-my-claudecode:executor-low': 'Kevin', 'oh-my-claudecode:executor-high': 'Kevin',
-  'oh-my-claudecode:deep-executor': 'Kevin', 'general-purpose': 'Kevin',
-  // ─── Sophie: 디자인/프론트 ───
-  'frontend-engineer': 'Sophie', 'frontend-engineer-low': 'Sophie', 'frontend-engineer-high': 'Sophie',
-  'oh-my-claudecode:designer': 'Sophie',
-  // ─── Emily: 문서 ───
-  'document-writer': 'Emily', 'dialogue-generator': 'Emily',
-  'oh-my-claudecode:writer': 'Emily', 'oh-my-claudecode:document-specialist': 'Emily',
-  // ─── Michael: 리서치 ───
-  'librarian': 'Michael', 'librarian-low': 'Michael',
-  'claude-code-guide': 'Michael', 'multimodal-looker': 'Michael',
-  // ─── Alex: 기획 ───
-  'prometheus': 'Alex', 'Plan': 'Alex', 'plan': 'Alex',
-  'oh-my-claudecode:planner': 'Alex',
-  // ─── Sam: QA ───
-  'qa-tester': 'Sam', 'oh-my-claudecode:qa-tester': 'Sam',
-};
+let lastUserMessage = '';
+let lastChapterUserMsg = '';  // 마지막 챕터의 사용자 메시지 (그룹핑용)
 
-// Reverse mapping: name → primary role
+// ─── Dynamic agent pool (no fixed role mapping) ─────────────────
+const AGENT_POOL = ['Jake', 'David', 'Kevin', 'Sophie', 'Emily', 'Michael', 'Alex', 'Sam'];
+const agentAssignments = new Map<string, string>(); // agentId → charName
+const usedCharacters = new Set<string>(); // currently occupied characters
+
+function assignCharacter(agentId: string, _agentType: string): string {
+  // Already assigned?
+  const existing = agentAssignments.get(agentId);
+  if (existing) return existing;
+
+  // Find first available character from pool
+  for (const name of AGENT_POOL) {
+    if (!usedCharacters.has(name)) {
+      agentAssignments.set(agentId, name);
+      usedCharacters.add(name);
+      return name;
+    }
+  }
+  // All occupied — reuse first in pool
+  const fallback = AGENT_POOL[0];
+  agentAssignments.set(agentId, fallback);
+  return fallback;
+}
+
+function releaseCharacter(agentId: string): string | null {
+  const name = agentAssignments.get(agentId);
+  if (name) {
+    agentAssignments.delete(agentId);
+    usedCharacters.delete(name);
+  }
+  return name || null;
+}
+
+// Legacy lookup for agent type → name (fallback for non-pooled lookups)
+const AGENT_NAMES: Record<string, string> = {};
+// Not used for assignment anymore, but kept for hook compatibility
+
+// Reverse mapping: name → primary role (dynamic, updated on assign)
 const NAME_TO_ROLE: Record<string, string> = {
-  'Jake': 'explore', 'David': 'oracle', 'Kevin': 'sisyphus-junior',
-  'Sophie': 'frontend-engineer', 'Emily': 'document-writer',
-  'Michael': 'librarian', 'Alex': 'prometheus', 'Sam': 'qa-tester',
+  'Jake': 'agent', 'David': 'agent', 'Kevin': 'agent',
+  'Sophie': 'agent', 'Emily': 'agent',
+  'Michael': 'agent', 'Alex': 'agent', 'Sam': 'agent',
 };
 
 const AGENT_PERSONALITIES: Record<string, string> = {
@@ -89,6 +95,7 @@ const AGENT_PERSONALITIES: Record<string, string> = {
   'Sam': '꼼꼼, 버그 찾으면 기뻐함, 장난기',
 };
 
+// ─── C-Team Personalities (for AI dialogue generation) ────────
 // Minimal tool info for fallback only
 const TOOL_INFO: Record<string, { emoji: string; verb: string }> = {
   'Read': { emoji: '📖', verb: '확인 중' },
@@ -231,32 +238,7 @@ async function generateIdleChat(): Promise<void> {
   const role = NAME_TO_ROLE[name] || 'agent';
   let msg: string | null = null;
 
-  // Try Haiku API first
-  if (anthropicClient) {
-    try {
-      const personality = AGENT_PERSONALITIES[name] || '';
-      const humor = Math.random() < 0.4;
-      const style = humor
-        ? '유머/드립을 섞어서. IT개발자 밈, 야근드립, 커피드립, 버그드립 등. 웃기게.'
-        : '자연스럽고 일상적으로. 편하게 수다떠는 느낌.';
-      const response = await anthropicClient.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 100,
-        messages: [{
-          role: 'user',
-          content: `IT 스타트업 휴게실에서 ${name}(${personality})이 혼잣말 또는 동료에게 한마디.
-20-50자. 한국어. 이모지 가끔. ${style}
-문장만 출력. 따옴표 없이. 설명 없이.`
-        }],
-      });
-      const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : null;
-      if (text && text.length > 0 && text.length < 80) {
-        msg = text;
-      }
-    } catch {}
-  }
-
-  // Fallback to predefined
+  // Predefined idle chat (callClaudeCLI 제거 — 동작 불안정)
   if (!msg) {
     msg = IDLE_CHATS[Math.floor(Math.random() * IDLE_CHATS.length)];
   }
@@ -274,8 +256,19 @@ async function generateIdleChat(): Promise<void> {
 
 // ─── Transcript Scanner (Agent Work Detection) ─────────────────
 
+// ─── Usage Tracking ──────────────────────────────────────────
+let usageData = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  contextWindow: 0,      // estimated from preTokens on compact
+  lastTurnContext: 0,     // last turn's input+cache_read (current context size)
+  lastEmitTime: 0,
+};
+
 let transcriptOffset = 0;
 let transcriptPath: string | null = null;
+let currentPlanFile: string | null = null;  // 현재 세션의 plan 파일 (transcript에서 추출)
 let transcriptLastCheck = 0;
 const agentTypeMap: Record<string, string> = {};
 const agentIdToType: Record<string, string> = {};
@@ -298,7 +291,6 @@ function findCurrentTranscript(): string | null {
   try {
     const projectDirs = fs.readdirSync(projectsDir);
     for (const dir of projectDirs) {
-      if (!dir.includes("claude-backstage")) continue;
 
       const fullDir = path.join(projectsDir, dir);
       try {
@@ -344,7 +336,7 @@ function scanTranscriptForAgentWork(): void {
             const e = JSON.parse(line);
             if (e.message?.content) {
               for (const c of e.message.content) {
-                if (c.type === 'tool_use' && c.name === 'Task' && c.input?.subagent_type) {
+                if (c.type === 'tool_use' && (c.name === 'Task' || c.name === 'Agent') && c.input?.subagent_type) {
                   agentTypeMap[c.id] = c.input.subagent_type;
                 }
               }
@@ -354,6 +346,20 @@ function scanTranscriptForAgentWork(): void {
               if (aid && e.parentToolUseID && agentTypeMap[e.parentToolUseID]) {
                 agentIdToType[aid] = agentTypeMap[e.parentToolUseID];
               }
+            }
+            // Detect current session's plan file from system-reminder
+            if (!currentPlanFile && e.type === 'system' && typeof e.message?.content === 'string') {
+              const planMatch = e.message.content.match(/plan file exists.*?at:\s*([^\n]+\.md)/);
+              if (planMatch) currentPlanFile = planMatch[1].trim();
+            }
+            // Also track usage from full initial scan
+            if (e.type === 'assistant' && e.message?.usage) {
+              const u = e.message.usage;
+              if (u.input_tokens) usageData.inputTokens += u.input_tokens;
+              if (u.output_tokens) usageData.outputTokens += u.output_tokens;
+              if (u.cache_read_input_tokens) usageData.cacheReadTokens += u.cache_read_input_tokens;
+              // Track last turn's context size (overwrite, not accumulate)
+              usageData.lastTurnContext = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0);
             }
           } catch {}
         }
@@ -380,7 +386,9 @@ function scanTranscriptForAgentWork(): void {
   let readFrom = transcriptOffset;
   const maxRead = 512 * 1024;
   if (stat.size - readFrom > maxRead) {
-    readFrom = stat.size - maxRead;
+    // Don't go before transcriptOffset — that would re-read already-hashed content
+    // and cause thinking/talk dedup to block new events
+    readFrom = Math.max(transcriptOffset, stat.size - maxRead);
   }
 
   let content: string;
@@ -404,10 +412,30 @@ function scanTranscriptForAgentWork(): void {
       const entry = JSON.parse(line);
       if (entry.message?.content) {
         for (const c of entry.message.content) {
-          if (c.type === "tool_use" && c.name === "Task" && c.input?.subagent_type) {
+          if (c.type === "tool_use" && (c.name === "Task" || c.name === "Agent") && c.input?.subagent_type) {
             agentTypeMap[c.id] = c.input.subagent_type;
           }
         }
+      }
+      // Usage tracking from assistant messages
+      if (entry.type === 'assistant' && entry.message?.usage) {
+        const u = entry.message.usage;
+        if (u.input_tokens) usageData.inputTokens += u.input_tokens;
+        if (u.output_tokens) usageData.outputTokens += u.output_tokens;
+        if (u.cache_read_input_tokens) usageData.cacheReadTokens += u.cache_read_input_tokens;
+        // Track last turn's context size (overwrite, not accumulate)
+        usageData.lastTurnContext = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0);
+      }
+
+      // Context window estimation from compact events
+      if (entry.type === 'summary' || (entry.message?.content && Array.isArray(entry.message.content) && entry.message.content.some((c: any) => c.type === 'text' && typeof c.text === 'string' && c.text.includes('compact_boundary')))) {
+        try {
+          const textBlock = entry.message?.content?.find((c: any) => c.type === 'text');
+          if (textBlock?.text) {
+            const match = textBlock.text.match(/preTokens["\s:]+(\d+)/);
+            if (match) usageData.contextWindow = parseInt(match[1]);
+          }
+        } catch {}
       }
     } catch {}
   }
@@ -466,7 +494,7 @@ function scanTranscriptForAgentWork(): void {
             if (input.path) detail += ` in ${input.path}`;
           }
 
-          const agentName = AGENT_NAMES[agentType] || "Agent";
+          const agentName = assignCharacter(agentId, agentType);
           latestPerAgent.set(agentName, { agentName, agentType, tool: toolName, target: shortTarget, detail });
         }
       }
@@ -509,14 +537,55 @@ function scanTranscriptForAgentWork(): void {
     if (now2 - info.lastActivity > AGENT_IDLE_TIMEOUT) {
       const ts = new Date().toTimeString().slice(0, 8);
       const epoch = Math.floor(now2 / 1000);
-      const entry = JSON.stringify({
-        ts, epoch, type: "done",
-        speaker: name, role: info.agentType,
-        msg: "작업 완료",
-      });
-      try { fs.appendFileSync(HISTORY_FILE, entry + "\n"); } catch {}
       activeAgents.delete(name);
+      for (const [aid, charName] of agentAssignments) {
+        if (charName === name) { releaseCharacter(aid); break; }
+      }
+      // dialogue-generator는 건너뛰기 (대사 생성 에이전트이므로 완료 보고 불필요)
+      if (info.agentType.includes('dialogue-generator')) continue;
+      // 완료 대사: history에서 해당 에이전트의 최근 이벤트를 읽어 맥락 반영
+      let doneMsg = "작업 완료";
+      try {
+        if (fs.existsSync(HISTORY_FILE)) {
+          const lines = fs.readFileSync(HISTORY_FILE, 'utf-8').trim().split('\n').reverse();
+          const recentWork: string[] = [];
+          for (const line of lines) {
+            if (recentWork.length >= 3) break;
+            try {
+              const ev = JSON.parse(line);
+              if (ev.speaker === name && ev.type === 'c-bubble' && ev.msg) {
+                recentWork.push(ev.msg);
+              }
+            } catch {}
+          }
+          if (recentWork.length > 0) {
+            doneMsg = recentWork[0].replace(/[.!？！~]+$/, '') + ' — 완료!';
+          }
+        }
+      } catch {}
+      const entry = JSON.stringify({ ts, epoch, type: "done", speaker: name, role: info.agentType, msg: doneMsg });
+      try { fs.appendFileSync(HISTORY_FILE, entry + "\n"); } catch {}
     }
+  }
+
+  // Emit usage update every 10 seconds
+  const nowMs3 = Date.now();
+  if (nowMs3 - usageData.lastEmitTime >= 10_000 && (usageData.inputTokens > 0 || usageData.outputTokens > 0)) {
+    usageData.lastEmitTime = nowMs3;
+    const ts = new Date().toTimeString().slice(0, 8);
+    const epoch = Math.floor(nowMs3 / 1000);
+    const usageEntry = JSON.stringify({
+      ts, epoch, type: 'usage-update',
+      speaker: 'Board', role: 'system', msg: '',
+      data: {
+        inputTokens: usageData.inputTokens,
+        outputTokens: usageData.outputTokens,
+        cacheReadTokens: usageData.cacheReadTokens,
+        contextWindow: usageData.contextWindow,
+        lastTurnContext: usageData.lastTurnContext,
+      }
+    });
+    try { fs.appendFileSync(HISTORY_FILE, usageEntry + '\n'); } catch {}
   }
 
   // User input detection
@@ -546,6 +615,7 @@ function scanTranscriptForAgentWork(): void {
           speaker: "You", role: "client", msg,
         });
         try { fs.appendFileSync(HISTORY_FILE, userEntry + "\n"); } catch {}
+        lastUserMessage = msg;
         break;
       }
     } catch {}
@@ -606,7 +676,9 @@ function scanTranscriptForAgentWork(): void {
 
   // Chris thinking (from model's thinking blocks → 💭 thought bubbles, chunked)
   // Queue: extract all chunks from new thinking blocks, emit one per scan cycle
-  if (thinkQueue.length === 0 && nowEpoch - lastChrisTalkEpoch >= 6) {
+  const thinkCondition = thinkQueue.length === 0 && nowEpoch - lastChrisTalkEpoch >= 6;
+  console.log(`[think-debug] queue=${thinkQueue.length} gap=${nowEpoch - lastChrisTalkEpoch} lines=${lines.length} condition=${thinkCondition}`);
+  if (thinkCondition) {
     for (const line of lines) {
       try {
         const entry = JSON.parse(line);
@@ -616,11 +688,14 @@ function scanTranscriptForAgentWork(): void {
         for (const block of entry.message.content) {
           if (block.type !== "thinking" || !block.thinking) continue;
 
+          console.log(`[think-debug] found thinking block, len=${block.thinking.length}`);
           const thinking: string = block.thinking.trim();
           if (thinking.length < 30) continue;
 
           const thinkHash = `think:${thinking.slice(0, 80)}`;
-          if (recordedTextHashes.has(thinkHash)) continue;
+          const isDup = recordedTextHashes.has(thinkHash);
+          console.log(`[think-debug] hash="${thinkHash.slice(0, 50)}" dup=${isDup}`);
+          if (isDup) continue;
           recordedTextHashes.add(thinkHash);
 
           // Split into paragraphs (double newline or logical breaks)
@@ -630,23 +705,28 @@ function scanTranscriptForAgentWork(): void {
 
           for (const para of paragraphs) {
             // Extract meaningful lines from each paragraph
+            // Keep: natural language sentences (Korean or English prose)
+            // Remove: code syntax, markup, table rows
             const paraLines = para.split('\n')
               .map((l: string) => l.trim())
               .filter((l: string) => l.length > 10 && l.length < 200)
               .filter((l: string) => !l.startsWith('<') && !l.startsWith('{') && !l.startsWith('```'))
-              .filter((l: string) => !l.startsWith('//') && !l.startsWith('*') && !l.startsWith('#'))
-              .filter((l: string) => !l.startsWith('|') && !l.startsWith('-'))
+              .filter((l: string) => !l.startsWith('//') && !l.startsWith('#'))
+              .filter((l: string) => !l.startsWith('|'))
               .filter((l: string) => !/^(import|const|let|var|function|class|if|for|return|export)\b/.test(l));
 
+            if (paraLines.length === 0) continue;
+
+            // Prefer Korean lines, but fall back to any prose line
             const korean = paraLines.filter((l: string) => /[\uAC00-\uD7AF]/.test(l));
             const best = korean.length > 0 ? korean : paraLines;
-            if (best.length === 0) continue;
 
             let msg = best.slice(0, 2).join(' ');
-            msg = msg.replace(/\*\*/g, '').replace(/`/g, '').replace(/^\s*>\s*/g, '');
+            msg = msg.replace(/\*\*/g, '').replace(/`/g, '').replace(/^\s*>\s*/g, '').replace(/^[-*]\s+/, '');
             if (msg.length > 120) msg = msg.slice(0, 117) + '...';
             if (msg.length < 10) continue;
 
+            console.log(`[think-debug] queued chunk: "${msg.slice(0, 60)}"`);
             thinkQueue.push(msg);
           }
 
@@ -673,6 +753,124 @@ function scanTranscriptForAgentWork(): void {
     });
 
     try { fs.appendFileSync(HISTORY_FILE, thinkEntry + '\n'); } catch {}
+  }
+
+  // ═══ Chris 대화록 챕터 로깅 ═══
+  // 새 assistant 응답에서 thinking + text + tools를 하나의 챕터로 구조화
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry.type !== "assistant" || entry.message?.role !== "assistant") continue;
+      if (!entry.message?.content) continue;
+
+      const msgId = entry.message.id || '';
+      if (!msgId) continue;
+      const chapterKey = `chapter:${msgId}`;
+      if (recordedTextHashes.has(chapterKey)) continue;
+      recordedTextHashes.add(chapterKey);
+
+      let thinkLines: string[] = [];
+      let responseText = '';
+      // 사용자 메시지에서 핵심 주제 추출 (강력 요약)
+      let chapterTitle = '';
+      if (lastUserMessage) {
+        let line = lastUserMessage.split('\n')[0].trim();
+        line = line.replace(/^\d+[\.\)]\s*/, '');  // 번호 리스트 접두어 제거
+        line = line.replace(/[.。!！?？…~]+$/g, '')
+          .replace(/\s*(해\s*줘|해주세요|하세요|해봐|부탁|좀|할\s*것|하기)\s*$/g, '')
+          .trim();
+        chapterTitle = line.length > 40 ? line.slice(0, 40) + '…' : (line || '');
+      }
+      const files: string[] = [];
+
+      for (const block of entry.message.content) {
+        if (block.type === 'thinking' && block.thinking) {
+          const t = block.thinking.trim();
+          const meaningful = t.split('\n')
+            .map((l: string) => l.trim())
+            .filter((l: string) => l.length > 10 && l.length < 200)
+            .filter((l: string) => !l.startsWith('<') && !l.startsWith('{') && !l.startsWith('```'))
+            .filter((l: string) => !l.startsWith('//') && !l.startsWith('#') && !l.startsWith('|'))
+            .filter((l: string) => !/^(import|const|let|var|function|class|if|for|return|export)\b/.test(l))
+            .filter((l: string) => /[\uAC00-\uD7AF]/.test(l));
+
+          if (meaningful.length > 0 && !chapterTitle) {
+            const t0 = meaningful[0].replace(/\*\*/g, '').replace(/`/g, '').replace(/[.。!！?？…]+$/g, '').trim();
+            chapterTitle = t0.length > 25 ? t0.slice(0, 25) + '…' : t0;
+          }
+          for (const m of meaningful.slice(0, 15)) {
+            let tl = m.replace(/\*\*/g, '').replace(/`/g, '').replace(/^[-*]\s+/, '');
+            if (tl.length > 300) tl = tl.slice(0, 297) + '...';
+            thinkLines.push(tl);
+          }
+        }
+
+        if (block.type === 'text' && block.text) {
+          const txt = block.text.trim();
+          const koreanLines = txt.split('\n')
+            .map((l: string) => l.trim())
+            .filter((l: string) => l.length > 5 && /[\uAC00-\uD7AF]/.test(l))
+            .filter((l: string) => !l.startsWith('```') && !l.startsWith('|') && !l.startsWith('#'));
+          if (koreanLines.length > 0) {
+            responseText = koreanLines.slice(0, 3).join(' ');
+            if (responseText.length > 500) responseText = responseText.slice(0, 497) + '...';
+          }
+        }
+
+        if (block.type === 'tool_use') {
+          const input = block.input as any;
+          const fp = input?.file_path || input?.path || input?.command || '';
+          if (typeof fp === 'string' && fp.length > 0) {
+            const basename = fp.split('/').pop() || fp;
+            if (!files.includes(basename)) files.push(basename);
+          }
+        }
+      }
+
+      if (thinkLines.length === 0 && !responseText) continue;
+      if (!chapterTitle) {
+        const fb = responseText.slice(0, 25);
+        chapterTitle = responseText.length > 25 ? fb + '…' : (fb || '(무제)');
+      }
+
+      // 같은 사용자 메시지 주제면 기존 챕터에 병합
+      if (lastUserMessage && lastUserMessage === lastChapterUserMsg) {
+        try {
+          const logContent = fs.existsSync(CHRIS_LOG_FILE) ? fs.readFileSync(CHRIS_LOG_FILE, 'utf-8') : '';
+          const logLines = logContent.trim().split('\n').filter(Boolean);
+          if (logLines.length > 0) {
+            const lastEntry = JSON.parse(logLines[logLines.length - 1]);
+            for (const t of thinkLines) {
+              if (!lastEntry.thinks.includes(t)) lastEntry.thinks.push(t);
+            }
+            if (responseText && responseText !== lastEntry.response) {
+              lastEntry.response = (lastEntry.response ? lastEntry.response + '\n' : '') + responseText;
+              if (lastEntry.response.length > 500) lastEntry.response = lastEntry.response.slice(0, 497) + '...';
+            }
+            for (const f of files) {
+              if (!lastEntry.files.includes(f)) lastEntry.files.push(f);
+            }
+            lastEntry.ts = new Date().toTimeString().slice(0, 8);
+            logLines[logLines.length - 1] = JSON.stringify(lastEntry);
+            fs.writeFileSync(CHRIS_LOG_FILE, logLines.join('\n') + '\n');
+            continue;
+          }
+        } catch {}
+      }
+
+      // 새 챕터 생성
+      lastChapterUserMsg = lastUserMessage;
+      const chapterEntry = JSON.stringify({
+        ts: new Date().toTimeString().slice(0, 8),
+        epoch: nowEpoch,
+        title: chapterTitle,
+        thinks: thinkLines,
+        response: responseText,
+        files,
+      });
+
+      try { fs.appendFileSync(CHRIS_LOG_FILE, chapterEntry + '\n'); } catch {}
+    } catch {}
   }
 
   // Prune
@@ -745,7 +943,7 @@ function scanSubagentFiles(): void {
     }
 
     const lines = content.trim().split("\n");
-    const agentName = AGENT_NAMES[agentType] || "Agent";
+    const agentName = assignCharacter(agentId, agentType);
 
     for (const line of lines) {
       try {
@@ -811,9 +1009,8 @@ const activeConnections = new Set<{ close: () => void }>();
 function handleSSE(): Response {
   ensureHistoryFile();
 
-  let offset = fs.existsSync(HISTORY_FILE)
-    ? fs.statSync(HISTORY_FILE).size
-    : 0;
+  // SSE streams only new events; initial state is loaded via /history REST endpoint
+  let offset = fs.existsSync(HISTORY_FILE) ? fs.statSync(HISTORY_FILE).size : 0;
 
   let watcher: fs.FSWatcher | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -898,12 +1095,28 @@ function handleSSE(): Response {
 // ─── HTTP Handlers ──────────────────────────────────────────────
 
 function handleHistory(): Response {
-  const entries = getLastNLines(HISTORY_FILE, 50);
-  return new Response(JSON.stringify(entries), {
-    headers: {
-      ...CORS_HEADERS,
-      "Content-Type": "application/json",
-    },
+  // State events (tasks, usage) from full history + recent 50 events for chat/bubbles
+  if (!fs.existsSync(HISTORY_FILE)) {
+    return new Response("[]", { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+  }
+  const content = fs.readFileSync(HISTORY_FILE, "utf-8");
+  const allLines = content.split("\n").filter(l => l.trim().length > 0);
+  const STATE_TYPES = new Set(['task-create', 'task-update', 'usage-update', 'assign', 'done']);
+  const stateEntries: unknown[] = [];
+  const allParsed: unknown[] = [];
+  for (const line of allLines) {
+    try {
+      const obj = JSON.parse(line) as any;
+      allParsed.push(obj);
+      if (STATE_TYPES.has(obj.type)) stateEntries.push(obj);
+    } catch {}
+  }
+  const recentEntries = allParsed.slice(-50);
+  // Merge: state events first, then recent (dedup by reference)
+  const recentSet = new Set(recentEntries);
+  const merged = [...stateEntries.filter(e => !recentSet.has(e)), ...recentEntries];
+  return new Response(JSON.stringify(merged), {
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
 }
 
@@ -1035,18 +1248,154 @@ const server = Bun.serve({
         return new Response("Method Not Allowed", { status: 405, headers: CORS_HEADERS });
       case "/characters":
         return await handleCharacters();
+      case "/plans": {
+        try {
+          const plansDir = path.join(process.env.HOME || '', '.claude', 'plans');
+          const archiveDir = path.join(PLUGIN_DIR, 'plan-archive');
+          const jsonHeaders = { 'Content-Type': 'application/json', ...CORS_HEADERS };
+
+          // plan-archive 디렉토리 생성
+          if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
+
+          // 양쪽 디렉토리에서 .md 파일 수집
+          const allFiles: { name: string; mtime: number; title: string; size: number; source: string }[] = [];
+          const seen = new Set<string>();
+
+          for (const [dir, source] of [[plansDir, 'plans'], [archiveDir, 'archive']] as const) {
+            if (!fs.existsSync(dir)) continue;
+            for (const f of fs.readdirSync(dir)) {
+              if (!f.endsWith('.md') || seen.has(f)) continue;
+              seen.add(f);
+              const fpath = path.join(dir, f);
+              const stat = fs.statSync(fpath);
+              const firstLine = fs.readFileSync(fpath, 'utf-8').split('\n')[0] || '';
+              const title = firstLine.replace(/^#+\s*/, '').trim() || f;
+              allFiles.push({ name: f, mtime: stat.mtimeMs, title, size: stat.size, source });
+              // 새 plan을 archive에 자동 복사
+              if (source === 'plans') {
+                const archivePath = path.join(archiveDir, f);
+                if (!fs.existsSync(archivePath)) {
+                  try { fs.copyFileSync(fpath, archivePath); } catch {}
+                }
+              }
+            }
+          }
+
+          allFiles.sort((a, b) => b.mtime - a.mtime);
+
+          // 현재 세션의 활성 plan 표시
+          return new Response(JSON.stringify({
+            files: allFiles,
+            currentPlan: currentPlanFile ? path.basename(currentPlanFile) : null,
+          }), { headers: jsonHeaders });
+        } catch {
+          return new Response(JSON.stringify({ files: [], currentPlan: null }), { headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
+        }
+      }
+      case "/chris-log": {
+        try {
+          const content = fs.existsSync(CHRIS_LOG_FILE) ? fs.readFileSync(CHRIS_LOG_FILE, 'utf-8') : '';
+          const entries = content.trim().split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+          return new Response(JSON.stringify(entries), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        } catch {
+          return new Response('[]', { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        }
+      }
+      case "/agent-info": {
+        const name = url.searchParams.get('name');
+        if (!name) return new Response('{}', { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+
+        const info = activeAgents.get(name);
+        if (!info) return new Response(JSON.stringify({ active: false }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+
+        // history.jsonl에서 이 에이전트의 최근 이벤트 추출
+        const recentEvents: any[] = [];
+        try {
+          const content = fs.readFileSync(HISTORY_FILE, 'utf-8');
+          const lines = content.trim().split('\n');
+          for (let i = lines.length - 1; i >= 0 && recentEvents.length < 10; i--) {
+            try {
+              const e = JSON.parse(lines[i]);
+              if (e.speaker === name) recentEvents.unshift(e);
+            } catch {}
+          }
+        } catch {}
+
+        return new Response(JSON.stringify({
+          active: true,
+          name,
+          agentType: info.agentType,
+          lastActivity: info.lastActivity,
+          recentEvents,
+        }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+      }
+      case "/refresh": {
+        try {
+          // history에서 state 이벤트 + done/assign 보존, 나머지 삭제
+          const preserveTypes = new Set(['task-create', 'task-update', 'usage-update', 'done', 'assign']);
+          if (fs.existsSync(HISTORY_FILE)) {
+            const raw = fs.readFileSync(HISTORY_FILE, 'utf-8');
+            const lines = raw.trim().split('\n');
+            // done 이벤트를 done-archive.jsonl에 반영구 보관
+            const doneArchive = path.join(PLUGIN_DIR, 'done-archive.jsonl');
+            const doneLines = lines.filter(line => {
+              try { return JSON.parse(line).type === 'done'; } catch { return false; }
+            });
+            if (doneLines.length > 0) {
+              fs.appendFileSync(doneArchive, doneLines.join('\n') + '\n');
+            }
+            // state + done + assign 보존
+            const preserved = lines.filter(line => {
+              try { return preserveTypes.has(JSON.parse(line).type); } catch { return false; }
+            }).join('\n');
+            fs.writeFileSync(HISTORY_FILE, preserved ? preserved + '\n' : '');
+          }
+          if (fs.existsSync(CHRIS_LOG_FILE)) fs.writeFileSync(CHRIS_LOG_FILE, '');
+          recordedTextHashes.clear();
+          // 즉시 transcript 재스캔 → 현재 유효한 todo/doing task 갱신
+          scanTranscriptForAgentWork();
+          return new Response(JSON.stringify({ ok: true }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        } catch {
+          return new Response(JSON.stringify({ ok: false }), { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        }
+      }
       case "/status":
         return new Response(JSON.stringify({ ok: true }), {
           headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
         });
-      default:
-        if (url.pathname.startsWith("/js/") || url.pathname.startsWith("/css/") || url.pathname.startsWith("/sprites/")) {
+      // /generate-dialogue 제거됨 — Hook → dialogue-generator Task 파이프라인으로 대체
+      default: {
+        // /plan/:filename — 특정 plan 파일 상세 반환
+        if (url.pathname.startsWith("/plan/")) {
+          try {
+            const fileName = decodeURIComponent(url.pathname.slice(6));
+            const plansDir = path.join(process.env.HOME || '', '.claude', 'plans');
+            const archiveDir = path.join(PLUGIN_DIR, 'plan-archive');
+            const jsonHeaders = { 'Content-Type': 'application/json', ...CORS_HEADERS };
+
+            let filePath = path.join(plansDir, fileName);
+            if (!fs.existsSync(filePath)) filePath = path.join(archiveDir, fileName);
+            if (!fs.existsSync(filePath)) {
+              return new Response(JSON.stringify({ error: 'not found' }), { status: 404, headers: jsonHeaders });
+            }
+
+            const content = fs.readFileSync(filePath, 'utf-8');
+            return new Response(JSON.stringify({
+              fileName,
+              content,
+            }), { headers: jsonHeaders });
+          } catch {
+            return new Response(JSON.stringify({ error: 'failed' }), { status: 500, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
+          }
+        }
+        if (url.pathname.startsWith("/js/") || url.pathname.startsWith("/css/") || url.pathname.startsWith("/sprites/") || url.pathname.startsWith("/assets/")) {
           return await handleStaticFile(url.pathname);
         }
         return new Response("Not Found", {
           status: 404,
           headers: CORS_HEADERS,
         });
+      }
     }
   },
 });
