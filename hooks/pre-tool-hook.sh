@@ -8,6 +8,9 @@ ACTIVE_AGENT_FILE="$HOME/.claude/plugins/backstage/active-agent.json"
 HISTORY_FILE="$HOME/.claude/plugins/backstage/history.jsonl"
 LAST_TOOL_FILE="$HOME/.claude/plugins/backstage/last-chris-tool.txt"
 
+# 활성 세션의 cwd 기록 (서버가 올바른 transcript를 선택하도록)
+echo "$(pwd)" > "$HOME/.claude/plugins/backstage/active-session-cwd.txt" 2>/dev/null
+
 input=$(cat)
 tool_name=$(echo "$input" | jq -r '.tool_name // ""')
 
@@ -70,6 +73,18 @@ case "$tool_name" in
         fi
         ;;
 esac
+
+if [ "$tool_name" = "TaskCreate" ]; then
+    subject=$(echo "$input" | jq -r '.tool_input.subject // ""')
+    description=$(echo "$input" | jq -r '.tool_input.description // ""')
+
+    ts=$(date '+%H:%M:%S')
+    epoch=$(date '+%s')
+
+    mkdir -p "$(dirname "$HISTORY_FILE")"
+    jq -nc --arg ts "$ts" --arg ep "$epoch" --arg subj "$subject" --arg desc "$description" \
+        '{ts:$ts,epoch:($ep|tonumber),type:"task-create",speaker:"Board",role:"system",msg:"",data:{subject:$subj,description:$desc,status:"pending"}}' >> "$HISTORY_FILE"
+fi
 
 if [ "$tool_name" = "Task" ]; then
     agent_type=$(echo "$input" | jq -r '.tool_input.subagent_type // "unknown"')

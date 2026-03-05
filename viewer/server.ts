@@ -336,11 +336,27 @@ function findCurrentTranscript(): string | null {
   const projectsDir = path.join(homedir(), ".claude/projects");
   if (!fs.existsSync(projectsDir)) return null;
 
+  // hook이 기록한 활성 세션의 cwd 읽기 → 해당 프로젝트의 transcript만 선택
+  let activeCwdEncoded = '';
+  try {
+    const cwdFile = path.join(PLUGIN_DIR, 'active-session-cwd.txt');
+    if (fs.existsSync(cwdFile)) {
+      const cwd = fs.readFileSync(cwdFile, 'utf-8').trim();
+      // Claude Code는 cwd의 /를 -로 인코딩: /Users/aster/workspace/foo → -Users-aster-workspace-foo
+      activeCwdEncoded = cwd.replace(/\//g, '-');
+    }
+  } catch {}
+
   let newest: { path: string; mtime: number } | null = null;
 
   try {
     const projectDirs = fs.readdirSync(projectsDir);
     for (const dir of projectDirs) {
+      // 플러그인 캐시 경로 제외 (dialogue-generator 등의 transcript가 선택되는 문제 방지)
+      if (dir.includes('claude-plugins-cache')) continue;
+
+      // 활성 세션 cwd가 있으면 해당 프로젝트만 선택 (세션 혼합 방지)
+      if (activeCwdEncoded && !dir.startsWith(activeCwdEncoded)) continue;
 
       const fullDir = path.join(projectsDir, dir);
       try {
@@ -365,6 +381,10 @@ function findCurrentTranscript(): string | null {
       } catch { continue; }
     }
   } catch { return null; }
+
+  if (newest) {
+    console.log(`[transcript] selected: ${path.basename(path.dirname(newest.path))}/${path.basename(newest.path)} (${(fs.statSync(newest.path).size / 1024).toFixed(0)}KB)`);
+  }
 
   return newest?.path || null;
 }
@@ -879,28 +899,25 @@ function scanTranscriptForAgentWork(): void {
 
   // ═══ Chris 대화록 챕터 로깅 ═══
   // 새 assistant 응답에서 thinking + text + tools를 하나의 챕터로 구조화
-  // history.jsonl의 request 이벤트에서 최근 사용자 메시지 추출
-  let chapterUserMsg = '';
-  try {
-    const histContent = fs.existsSync(HISTORY_FILE) ? fs.readFileSync(HISTORY_FILE, 'utf-8') : '';
-    const histLines = histContent.trim().split('\n').reverse();
-    for (const hl of histLines) {
-      try {
-        const he = JSON.parse(hl);
-        if (he.type === 'request' && he.msg && he.msg.length >= 3) {
-          // dialogue prompt 필터링 (claude --print 호출이 request로 기록된 잔여분)
-          if (/IT스타트업 .+가 이 상황을 보고 한마디|JSON만.*lines.*speaker|완료 보고 한마디/.test(he.msg)) continue;
-          chapterUserMsg = he.msg.split('\n')[0].slice(0, 100);
-          break;
-        }
-      } catch {}
-    }
-  } catch {}
+  // transcript에서 직접 user 메시지 추적 (세션 분리 보장 — history.jsonl은 다른 세션 hook과 혼합 가능)
+  let chapterUserMsg = lastUserMessage ? lastUserMessage.split('\n')[0].slice(0, 100) : '';
   let chapterAssistantCount = 0;
   let chapterNewCount = 0;
   for (const line of lines) {
     try {
       const entry = JSON.parse(line);
+
+      // transcript 내 user 메시지 추적 (assistant 응답과 정확히 같은 세션)
+      if (entry.type === "user" && entry.message?.role === "user" && entry.message?.content) {
+        for (const block of entry.message.content) {
+          if (block.type === "text" && block.text) {
+            const umsg = block.text.trim().split('\n')[0].slice(0, 100);
+            if (umsg.length >= 3) chapterUserMsg = umsg;
+            break;
+          }
+        }
+        continue;
+      }
 
       if (entry.type !== "assistant" || entry.message?.role !== "assistant") continue;
       chapterAssistantCount++;
@@ -987,6 +1004,27 @@ function scanTranscriptForAgentWork(): void {
             if (!existing) tools.push({ name: toolName, detail });
           }
         }
+      }
+
+      // transcript thinking이 비면 (활성 세션 redact) → history.jsonl의 type:"think" 이벤트에서 보충
+      if (thinkLines.length === 0) {
+        try {
+          const histContent = fs.existsSync(HISTORY_FILE) ? fs.readFileSync(HISTORY_FILE, 'utf-8') : '';
+          const histLines = histContent.trim().split('\n');
+          // 최근 request 이후의 think 이벤트 수집 (현재 응답에 대한 thinking)
+          const recentThinks: string[] = [];
+          for (let i = histLines.length - 1; i >= 0 && recentThinks.length < 10; i--) {
+            try {
+              const he = JSON.parse(histLines[i]);
+              if (he.type === 'think' && he.msg && he.msg.length > 10) {
+                recentThinks.unshift(he.msg);
+              } else if (he.type === 'request') {
+                break; // 이전 사용자 메시지에서 멈춤
+              }
+            } catch {}
+          }
+          if (recentThinks.length > 0) thinkLines = recentThinks;
+        } catch {}
       }
 
       if (thinkLines.length === 0 && !responseText) continue;
