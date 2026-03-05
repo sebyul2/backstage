@@ -278,38 +278,17 @@ async function getUsagePercent(): Promise<{ fiveHour: number | null; sevenDay: n
     return { fiveHour: usageApiCache.fiveHour, sevenDay: usageApiCache.sevenDay };
   }
 
-  // 1. claude-hud 캐시 확인 (120초 TTL)
+  // claude-hud 캐시만 읽기 (직접 API 호출 안 함 → 429 방지)
   const hudCache = path.join(homedir(), '.claude/plugins/claude-hud/.usage-cache.json');
   try {
     const content = JSON.parse(fs.readFileSync(hudCache, 'utf-8'));
-    if (Date.now() - content.timestamp < 120_000) {
+    if (Date.now() - content.timestamp < 300_000) { // 5분 TTL
       usageApiCache = { fiveHour: content.data.fiveHour, sevenDay: content.data.sevenDay, ts: Date.now() };
       return { fiveHour: content.data.fiveHour, sevenDay: content.data.sevenDay };
     }
   } catch {}
 
-  // 2. 폴백: Keychain OAuth → API 직접 호출
-  try {
-    const { execFileSync } = await import('child_process');
-    const keychainData = execFileSync('/usr/bin/security',
-      ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
-      { encoding: 'utf8', timeout: 3000 }).trim();
-    const creds = JSON.parse(keychainData);
-    const token = creds.claudeAiOauth?.accessToken;
-    if (!token) return { fiveHour: null, sevenDay: null };
-
-    const resp = await fetch('https://api.anthropic.com/api/oauth/usage', {
-      headers: { 'Authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20' }
-    });
-    if (!resp.ok) return { fiveHour: null, sevenDay: null };
-    const data: any = await resp.json();
-    const result = {
-      fiveHour: Math.round(Math.max(0, Math.min(100, (data.five_hour?.utilization ?? 0) * 100))),
-      sevenDay: Math.round(Math.max(0, Math.min(100, (data.seven_day?.utilization ?? 0) * 100))),
-    };
-    usageApiCache = { ...result, ts: Date.now() };
-    return result;
-  } catch { return { fiveHour: null, sevenDay: null }; }
+  return { fiveHour: null, sevenDay: null };
 }
 
 let transcriptOffset = 0;
