@@ -1662,7 +1662,7 @@ async function processDialogueQueue(): Promise<void> {
         const cleanEnv = { ...process.env, BACKSTAGE_DIALOGUE: '1' };
         delete cleanEnv.CLAUDECODE;
 
-        const proc = Bun.spawn(['claude', '--print', '--model', 'haiku', prompt], {
+        const proc = Bun.spawn(['claude', '--print', '--model', 'haiku', '--plugin-dir', '/dev/null', prompt], {
           stdout: 'pipe',
           stderr: 'pipe',
           env: cleanEnv,
