@@ -375,6 +375,16 @@ function scanTranscriptForAgentWork(): void {
       transcriptPath = found;
       recordedToolIds.clear();
 
+      // 새 세션 감지 → pending/in_progress task 무효화
+      ensureHistoryFile();
+      const resetEntry = JSON.stringify({
+        ts: new Date().toTimeString().slice(0, 8),
+        epoch: Math.floor(Date.now() / 1000),
+        type: 'tasks-reset',
+        speaker: 'Board', role: 'system', msg: '',
+      });
+      try { fs.appendFileSync(HISTORY_FILE, resetEntry + '\n'); } catch {}
+
       // One-time scan: populate agentTypeMap from entire transcript
       // (needed so new agent_progress events can resolve agent names)
       try {
@@ -1454,9 +1464,15 @@ const server = Bun.serve({
             if (doneLines.length > 0) {
               fs.appendFileSync(doneArchive, doneLines.join('\n') + '\n');
             }
-            // state + done + assign 보존
+            // state + done + assign 보존 (pending/in_progress task는 제거, completed만 유지)
             const preserved = lines.filter(line => {
-              try { return preserveTypes.has(JSON.parse(line).type); } catch { return false; }
+              try {
+                const e = JSON.parse(line);
+                if (!preserveTypes.has(e.type)) return false;
+                // task-create/task-update 중 completed가 아닌 것은 제거
+                if ((e.type === 'task-create' || e.type === 'task-update') && e.data?.status !== 'completed') return false;
+                return true;
+              } catch { return false; }
             }).join('\n');
             fs.writeFileSync(HISTORY_FILE, preserved ? preserved + '\n' : '');
           }

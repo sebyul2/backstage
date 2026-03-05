@@ -301,6 +301,7 @@ function handleSSEEvent(entry) {
     case 'request':    handleUserInput(entry); break;
     case 'task-create':  handleTaskCreate(entry); break;
     case 'task-update':  handleTaskUpdate(entry); break;
+    case 'tasks-reset':  handleTasksReset(); break;
     case 'usage-update': handleUsageUpdate(entry); break;
     default:           handleGeneric(entry); break;
   }
@@ -509,6 +510,11 @@ function handleTaskUpdate(entry) {
   }
 }
 
+function handleTasksReset() {
+  // 새 세션 시작: pending/in_progress task만 제거, completed는 유지
+  dashboardState.tasks = dashboardState.tasks.filter(t => t.status === 'completed');
+}
+
 function handleUsageUpdate(entry) {
   if (!entry.data) return;
   dashboardState.usage = {
@@ -517,6 +523,8 @@ function handleUsageUpdate(entry) {
     cacheReadTokens: entry.data.cacheReadTokens || 0,
     contextWindow: entry.data.contextWindow || 0,
     lastTurnContext: entry.data.lastTurnContext || 0,
+    fiveHourPercent: entry.data.fiveHourPercent ?? null,
+    sevenDayPercent: entry.data.sevenDayPercent ?? null,
   };
 }
 
@@ -681,6 +689,7 @@ async function loadHistory() {
     try {
       if (entry.type === 'task-create') handleTaskCreate(entry);
       else if (entry.type === 'task-update') handleTaskUpdate(entry);
+      else if (entry.type === 'tasks-reset') handleTasksReset();
       else if (entry.type === 'usage-update') handleUsageUpdate(entry);
     } catch {}
   }
@@ -1757,6 +1766,8 @@ async function showAgentInfoPopup(name, clientX, clientY) {
         Object.assign(timeInfo.style, { fontSize: '10px', color: '#8B93A1', marginBottom: '12px' });
         body.appendChild(timeInfo);
 
+        // idle-chat 제외
+        if (data.recentEvents) data.recentEvents = data.recentEvents.filter(e => e.type !== 'idle-chat');
         if (data.recentEvents && data.recentEvents.length > 0) {
           const evTitle = document.createElement('div');
           evTitle.textContent = '최근 활동:';
