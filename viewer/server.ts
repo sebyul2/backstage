@@ -436,6 +436,21 @@ function scanTranscriptForAgentWork(): void {
             if (match) usageData.contextWindow = parseInt(match[1]);
           }
         } catch {}
+
+        // Chris-log에 compacting 이벤트 기록
+        const compactKey = `compact:${entry.message?.id || nowEpoch}`;
+        if (!recordedTextHashes.has(compactKey)) {
+          recordedTextHashes.add(compactKey);
+          const compactEntry = JSON.stringify({
+            ts: new Date().toTimeString().slice(0, 8),
+            epoch: nowEpoch,
+            type: 'compact',
+            title: '🔄 Compacting conversation...',
+            userMsg: '',
+            thinks: [], response: '', files: [], tools: [], agents: [],
+          });
+          try { fs.appendFileSync(CHRIS_LOG_FILE, compactEntry + '\n'); } catch {}
+        }
       }
     } catch {}
   }

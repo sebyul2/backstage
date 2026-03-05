@@ -1302,28 +1302,6 @@ async function showChrisLogPopup() {
   const existing = document.getElementById('task-popup-overlay');
   if (existing) existing.remove();
 
-  // 데이터 fetch
-  let chapters = [];
-  try {
-    const res = await fetch('/chris-log');
-    if (res.ok) chapters = await res.json();
-  } catch {}
-
-  // userMsg 기준으로 그룹핑
-  const groups = [];
-  let currentGroup = null;
-  for (const ch of chapters) {
-    const key = ch.userMsg || ch.title || '(무제)';
-    if (!currentGroup || currentGroup.userMsg !== key) {
-      currentGroup = { userMsg: key, ts: ch.ts, chapters: [ch] };
-      groups.push(currentGroup);
-    } else {
-      currentGroup.chapters.push(ch);
-      currentGroup.ts = ch.ts; // 최신 시간으로 업데이트
-    }
-  }
-  groups.reverse(); // 최신 순
-
   // 캔버스 위치 기준 정렬
   const canvasEl = document.getElementById('game');
   const canvasRect = canvasEl.getBoundingClientRect();
@@ -1377,19 +1355,70 @@ async function showChrisLogPopup() {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     cursor: 'pointer', userSelect: 'none',
   });
-  closeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); overlay.remove(); });
 
   popup.appendChild(closeBtn);
   popup.appendChild(header);
+
+  // 콘텐츠 영역 (폴링 시 이 영역만 갱신)
+  const contentContainer = document.createElement('div');
+  popup.appendChild(contentContainer);
+
+  let lastChapterCount = 0;
+
+  function renderContent(chapters) {
+    lastChapterCount = chapters.length;
+    const scrollTop = popup.scrollTop;
+    contentContainer.innerHTML = '';
+
+    // userMsg 기준으로 그룹핑
+    const groups = [];
+    let currentGroup = null;
+    for (const ch of chapters) {
+      if (ch.type === 'compact') {
+        // Compacting 이벤트는 독립 표시
+        groups.push({ userMsg: '🔄 Compacting conversation...', ts: ch.ts, chapters: [ch], isCompact: true });
+        currentGroup = null;
+        continue;
+      }
+      const key = ch.userMsg || ch.title || '(무제)';
+      if (!currentGroup || currentGroup.userMsg !== key) {
+        currentGroup = { userMsg: key, ts: ch.ts, chapters: [ch] };
+        groups.push(currentGroup);
+      } else {
+        currentGroup.chapters.push(ch);
+        currentGroup.ts = ch.ts;
+      }
+    }
+    groups.reverse();
 
   if (groups.length === 0) {
     const empty = document.createElement('div');
     empty.textContent = '아직 기록된 내용이 없습니다.';
     Object.assign(empty.style, { color: '#5F574F', fontSize: '12px' });
-    popup.appendChild(empty);
+    contentContainer.appendChild(empty);
   } else {
     // 2레벨 그룹핑 렌더링
     for (const grp of groups) {
+      // 🔄 Compacting 이벤트 — 특별 스타일로 표시
+      if (grp.isCompact) {
+        const compactEl = document.createElement('div');
+        Object.assign(compactEl.style, {
+          marginBottom: '10px', padding: '8px 12px',
+          background: '#1A1A2E', borderLeft: '3px solid #FFA300',
+          borderRadius: '4px',
+        });
+        const compactText = document.createElement('span');
+        compactText.textContent = '🔄 Compacting conversation...';
+        Object.assign(compactText.style, { color: '#FFA300', fontSize: '11px' });
+        const compactTs = document.createElement('span');
+        compactTs.textContent = grp.ts || '';
+        Object.assign(compactTs.style, { color: '#5F574F', fontSize: '10px', marginLeft: '12px' });
+        compactEl.appendChild(compactText);
+        compactEl.appendChild(compactTs);
+        contentContainer.appendChild(compactEl);
+        continue;
+      }
+
       const groupEl = document.createElement('div');
       Object.assign(groupEl.style, {
         marginBottom: '10px',
@@ -1604,18 +1633,43 @@ async function showChrisLogPopup() {
 
       groupEl.appendChild(groupHeader);
       groupEl.appendChild(groupBody);
-      popup.appendChild(groupEl);
+      contentContainer.appendChild(groupEl);
     }
   }
 
+    popup.scrollTop = scrollTop;
+  } // end renderContent
+
+  // 초기 렌더링
+  try {
+    const res = await fetch('/chris-log');
+    if (res.ok) { const chapters = await res.json(); renderContent(chapters); }
+  } catch {}
+
+  // 2초 폴링 — 변경 시에만 재렌더
+  const pollInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/chris-log');
+      if (!res.ok) return;
+      const chapters = await res.json();
+      if (chapters.length !== lastChapterCount) renderContent(chapters);
+    } catch {}
+  }, 2000);
+
+  const cleanup = () => clearInterval(pollInterval);
+
+  // X 버튼 클릭 닫기
+  closeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); cleanup(); overlay.remove(); });
+
   // 배경 클릭 닫기
   overlay.addEventListener('click', (ev) => {
-    if (ev.target === overlay) overlay.remove();
+    if (ev.target === overlay) { cleanup(); overlay.remove(); }
   });
 
   // ESC 닫기
   const escHandler = (ev) => {
     if (ev.key === 'Escape') {
+      cleanup();
       overlay.remove();
       document.removeEventListener('keydown', escHandler);
     }
