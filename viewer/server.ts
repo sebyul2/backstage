@@ -8,6 +8,7 @@ const HISTORY_FILE =
   path.join(PLUGIN_DIR, "history.jsonl");
 
 const CHRIS_LOG_FILE = path.join(PLUGIN_DIR, "chris-log.jsonl");
+const DIALOGUE_QUEUE_FILE = path.join(PLUGIN_DIR, "dialogue-queue.jsonl");
 
 const CHARACTERS_FILE = (() => {
   const local = path.join(import.meta.dir, "../hooks/characters.json");
@@ -264,7 +265,52 @@ let usageData = {
   contextWindow: 0,      // estimated from preTokens on compact
   lastTurnContext: 0,     // last turn's input+cache_read (current context size)
   lastEmitTime: 0,
+  fiveHourPercent: null as number | null,
+  sevenDayPercent: null as number | null,
 };
+
+// ─── Usage API (claude-hud cache → fallback API) ──────────────
+let usageApiCache: { fiveHour: number | null; sevenDay: number | null; ts: number } = { fiveHour: null, sevenDay: null, ts: 0 };
+
+async function getUsagePercent(): Promise<{ fiveHour: number | null; sevenDay: number | null }> {
+  // 자체 캐시 (60초)
+  if (Date.now() - usageApiCache.ts < 60_000 && usageApiCache.fiveHour !== null) {
+    return { fiveHour: usageApiCache.fiveHour, sevenDay: usageApiCache.sevenDay };
+  }
+
+  // 1. claude-hud 캐시 확인 (120초 TTL)
+  const hudCache = path.join(homedir(), '.claude/plugins/claude-hud/.usage-cache.json');
+  try {
+    const content = JSON.parse(fs.readFileSync(hudCache, 'utf-8'));
+    if (Date.now() - content.timestamp < 120_000) {
+      usageApiCache = { fiveHour: content.data.fiveHour, sevenDay: content.data.sevenDay, ts: Date.now() };
+      return { fiveHour: content.data.fiveHour, sevenDay: content.data.sevenDay };
+    }
+  } catch {}
+
+  // 2. 폴백: Keychain OAuth → API 직접 호출
+  try {
+    const { execFileSync } = await import('child_process');
+    const keychainData = execFileSync('/usr/bin/security',
+      ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
+      { encoding: 'utf8', timeout: 3000 }).trim();
+    const creds = JSON.parse(keychainData);
+    const token = creds.claudeAiOauth?.accessToken;
+    if (!token) return { fiveHour: null, sevenDay: null };
+
+    const resp = await fetch('https://api.anthropic.com/api/oauth/usage', {
+      headers: { 'Authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20' }
+    });
+    if (!resp.ok) return { fiveHour: null, sevenDay: null };
+    const data: any = await resp.json();
+    const result = {
+      fiveHour: Math.round(Math.max(0, Math.min(100, (data.five_hour?.utilization ?? 0) * 100))),
+      sevenDay: Math.round(Math.max(0, Math.min(100, (data.seven_day?.utilization ?? 0) * 100))),
+    };
+    usageApiCache = { ...result, ts: Date.now() };
+    return result;
+  } catch { return { fiveHour: null, sevenDay: null }; }
+}
 
 let transcriptOffset = 0;
 let transcriptPath: string | null = null;
@@ -305,6 +351,8 @@ function findCurrentTranscript(): string | null {
           const fullPath = path.join(fullDir, file);
           try {
             const stat = fs.statSync(fullPath);
+            // claude --print 세션의 짧은 transcript 무시 (10KB 미만)
+            if (stat.size < 10_000) continue;
             if (!newest || stat.mtimeMs > newest.mtime) {
               newest = { path: fullPath, mtime: stat.mtimeMs };
             }
@@ -323,7 +371,7 @@ function scanTranscriptForAgentWork(): void {
   if (!transcriptPath || (now - transcriptLastCheck) > 10_000) {
     transcriptLastCheck = now;
     const found = findCurrentTranscript();
-    if (found && found !== transcriptPath) {
+    if (found && found !== transcriptPath && (!transcriptPath || fs.statSync(found).size > (fs.statSync(transcriptPath).size * 0.5))) {
       transcriptPath = found;
       recordedToolIds.clear();
 
@@ -598,6 +646,8 @@ function scanTranscriptForAgentWork(): void {
         cacheReadTokens: usageData.cacheReadTokens,
         contextWindow: usageData.contextWindow,
         lastTurnContext: usageData.lastTurnContext,
+        fiveHourPercent: usageData.fiveHourPercent,
+        sevenDayPercent: usageData.sevenDayPercent,
       }
     });
     try { fs.appendFileSync(HISTORY_FILE, usageEntry + '\n'); } catch {}
@@ -615,6 +665,8 @@ function scanTranscriptForAgentWork(): void {
         const text = block.text.trim();
         if (text.length < 3 || text.length > 200) continue;
         if (text.startsWith("<") || text.startsWith("{")) continue;
+        // dialogue prompt 필터링 (큐에서 생성된 프롬프트가 transcript에 남는 경우)
+        if (text.includes('JSON만') || text.includes('dialogue-generator') || text.includes('한마디')) continue;
 
         const hash = `user:${text.slice(0, 60)}`;
         if (recordedTextHashes.has(hash)) continue;
@@ -781,6 +833,8 @@ function scanTranscriptForAgentWork(): void {
       try {
         const he = JSON.parse(hl);
         if (he.type === 'request' && he.msg && he.msg.length >= 3) {
+          // dialogue prompt 필터링 (claude --print 호출이 request로 기록된 잔여분)
+          if (/IT스타트업 .+가 이 상황을 보고 한마디|JSON만.*lines.*speaker|완료 보고 한마디/.test(he.msg)) continue;
           chapterUserMsg = he.msg.split('\n')[0].slice(0, 100);
           break;
         }
@@ -1372,7 +1426,7 @@ const server = Bun.serve({
           for (let i = lines.length - 1; i >= 0 && recentEvents.length < 10; i--) {
             try {
               const e = JSON.parse(lines[i]);
-              if (e.speaker === name) recentEvents.unshift(e);
+              if (e.speaker === name && e.type !== 'idle-chat') recentEvents.unshift(e);
             } catch {}
           }
         } catch {}
@@ -1569,11 +1623,105 @@ function checkAndActivateCTeam(): void {
   } catch {}
 }
 
+// ─── Dialogue Queue Processor ─────────────────────────────────────
+let dialogueQueueProcessing = false;
+
+async function processDialogueQueue(): Promise<void> {
+  if (dialogueQueueProcessing) return;
+  const exists = fs.existsSync(DIALOGUE_QUEUE_FILE);
+  const size = exists ? fs.statSync(DIALOGUE_QUEUE_FILE).size : 0;
+  if (!exists || size === 0) return;
+
+  let content: string;
+  try {
+    content = fs.readFileSync(DIALOGUE_QUEUE_FILE, 'utf-8').trim();
+    if (!content) return;
+  } catch { return; }
+
+  dialogueQueueProcessing = true;
+
+  try {
+    // 큐 즉시 비우기 (새 요청은 다음 사이클에 처리)
+    fs.writeFileSync(DIALOGUE_QUEUE_FILE, '');
+
+    const lines = content.split('\n').filter(Boolean);
+    const now = Math.floor(Date.now() / 1000);
+
+    for (const line of lines) {
+      let entry: any;
+      try { entry = JSON.parse(line); } catch { continue; }
+
+      // TTL 체크: 30초 이상 된 요청은 스킵
+      if (now - (entry.epoch || 0) > 30) continue;
+
+      const prompt = entry.prompt;
+      if (!prompt) continue;
+
+      try {
+        // claude --print (CLAUDECODE 제거로 중첩 방지 우회)
+        const cleanEnv = { ...process.env, BACKSTAGE_DIALOGUE: '1' };
+        delete cleanEnv.CLAUDECODE;
+
+        const proc = Bun.spawn(['claude', '--print', '--model', 'haiku', prompt], {
+          stdout: 'pipe',
+          stderr: 'pipe',
+          env: cleanEnv,
+        });
+        const killTimer = setTimeout(() => { try { proc.kill(); } catch {} }, 15_000);
+
+        const output = await new Response(proc.stdout).text();
+        await proc.exited;
+        clearTimeout(killTimer);
+
+        if (!output.trim()) continue;
+
+        // JSON 추출
+        let json: any = null;
+        try {
+          json = JSON.parse(output.trim());
+        } catch {
+          const match = output.match(/\{[\s\S]*"lines"[\s\S]*\}/);
+          if (match) {
+            try { json = JSON.parse(match[0]); } catch {}
+          }
+        }
+
+        if (!json?.lines?.length) continue;
+
+        const ts = new Date().toTimeString().slice(0, 8);
+        const epoch = Math.floor(Date.now() / 1000);
+
+        ensureHistoryFile();
+        for (let i = 0; i < json.lines.length; i++) {
+          const l = json.lines[i];
+          if (!l.msg) continue;
+          const speaker = l.speaker || entry.speaker || 'Agent';
+          const evType = entry.type === 'complete' ? 'done' : 'c-bubble';
+          const histEntry = JSON.stringify({
+            ts, epoch: epoch + i, type: evType,
+            speaker, role: entry.role || 'agent', msg: l.msg,
+          });
+          try { fs.appendFileSync(HISTORY_FILE, histEntry + '\n'); } catch {}
+        }
+      } catch {
+        // claude --print 실패 시 조용히 스킵
+      }
+    }
+  } finally {
+    dialogueQueueProcessing = false;
+  }
+}
+
 // ─── Timers ──────────────────────────────────────────────────────
 
 // Transcript scanner: every 3 seconds
 const transcriptScanTimer = setInterval(() => {
   try { scanTranscriptForAgentWork(); } catch {}
+  // Usage API 주기적 갱신 (fire-and-forget, 자체 60초 캐시)
+  getUsagePercent().then(u => {
+    usageData.fiveHourPercent = u.fiveHour;
+    usageData.sevenDayPercent = u.sevenDay;
+  }).catch(() => {});
 }, 3000);
 
 // Idle chat generator: every 20 seconds
@@ -1584,6 +1732,11 @@ const idleChatTimer = setInterval(() => {
 // [C] Team activation: every 3 seconds
 const cTeamTimer = setInterval(() => {
   try { checkAndActivateCTeam(); } catch {}
+}, 3000);
+
+// Dialogue queue processor: every 3 seconds
+const dialogueQueueTimer = setInterval(() => {
+  processDialogueQueue().catch(() => {});
 }, 3000);
 
 // ─── Auto-shutdown: no SSE listeners for 10 minutes ──────────
@@ -1606,6 +1759,7 @@ function shutdown(): void {
   clearInterval(transcriptScanTimer);
   clearInterval(idleChatTimer);
   clearInterval(cTeamTimer);
+  clearInterval(dialogueQueueTimer);
   clearInterval(idleCheckTimer);
   for (const conn of activeConnections) {
     conn.close();

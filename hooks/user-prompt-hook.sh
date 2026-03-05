@@ -5,6 +5,9 @@
 # Backstage 비활성 상태면 즉시 종료 (토큰 절약)
 [ ! -f "$HOME/.claude/plugins/backstage/enabled" ] && echo '{"continue": true}' && exit 0
 
+# dialogue-queue에서 claude --print 호출 시 재귀 방지 (환경변수 기반)
+[ "$BACKSTAGE_DIALOGUE" = "1" ] && echo '{"continue": true}' && exit 0
+
 PLUGIN_DIR="${BACKSTAGE_DIR:-$HOME/.claude/plugins/backstage}"
 CHARACTERS_FILE="$PLUGIN_DIR/characters.json"
 HISTORY_FILE="$PLUGIN_DIR/history.jsonl"
@@ -47,7 +50,8 @@ if [ ${#prompt} -lt 3 ]; then
 fi
 
 # AI 대화 생성 프롬프트 패턴 필터링 (hook 내부 claude 호출의 재귀 방지)
-if echo "$prompt" | grep -qE "^당신은 판교 IT 스타트업 대화 생성기입니다|^IT 스타트업.*슬랙 대화"; then
+# claude --print으로 dialogue-queue 처리 시 UserPromptSubmit이 트리거되어 프롬프트가 history에 누출됨
+if echo "$prompt" | grep -qE "^당신은 판교 IT 스타트업 대화 생성기입니다|^IT 스타트업.*슬랙 대화|IT스타트업 .+가 이 상황을 보고 한마디|JSON만.*lines.*speaker.*msg|작업 완료.*한마디|완료 보고 한마디"; then
   echo '{"continue": true}'
   exit 0
 fi
