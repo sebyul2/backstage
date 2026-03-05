@@ -184,9 +184,10 @@ export class BubbleManager {
     const colors = TYPE_COLORS[bubble.type] || TYPE_COLORS.talk;
     const { width, height, lines, alpha, scale } = bubble;
 
-    // Position bubble above character, centered
+    // Position bubble above character, centered (clamp to canvas top)
     const bx = cx - width / 2;
-    const by = cy - height - BUBBLE_TAIL_H;
+    let by = cy - height - BUBBLE_TAIL_H;
+    if (by < 2) by = 2; // 상단 잘림 방지
 
     ctx.save();
     ctx.globalAlpha = alpha;

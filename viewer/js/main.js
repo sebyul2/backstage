@@ -297,6 +297,7 @@ function handleSSEEvent(entry) {
     case 'c-idle':     handleCTeamIdle(entry); break;
     case 'c-bubble':   handleCTeamBubble(entry); break;
     case 'work-done':  handleWorkDone(entry); break;
+    case 'agent-status': handleAgentStatus(entry); break;
     case 'user-input':
     case 'request':    handleUserInput(entry); break;
     case 'task-create':  handleTaskCreate(entry); break;
@@ -407,6 +408,11 @@ function handleThink(entry) {
     chris._thinkTimer = setTimeout(() => { chris._isThinking = false; }, 8000);
   }
   // 기존 talk 처리도 실행
+  handleTalk(entry);
+}
+
+function handleAgentStatus(entry) {
+  // 크리스가 에이전트 진행 상태 보고 (말풍선 + 채팅)
   handleTalk(entry);
 }
 

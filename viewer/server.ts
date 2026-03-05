@@ -19,6 +19,14 @@ const CHARACTERS_FILE = (() => {
 const HTML_FILE = path.join(import.meta.dir, "./index.html");
 const VIEWER_DIR = import.meta.dir;
 
+// Read version from plugin.json (single source of truth)
+const PLUGIN_VERSION = (() => {
+  try {
+    const pj = path.join(import.meta.dir, "../.claude-plugin/plugin.json");
+    return JSON.parse(fs.readFileSync(pj, "utf-8")).version || "0.0.0";
+  } catch { return "0.0.0"; }
+})();
+
 // MIME types for static files
 const MIME_TYPES: Record<string, string> = {
   ".js": "application/javascript",
@@ -303,8 +311,25 @@ let lastChrisTalkEpoch = 0;
 const recordedTextHashes = new Set<string>();
 const thinkQueue: string[] = [];
 
+// Thinking cache: msgId → thinking content (survives transcript redaction)
+const thinkingCache = new Map<string, string>();
+let transcriptWatcher: fs.FSWatcher | null = null;
+
+function setupTranscriptWatcher(): void {
+  if (transcriptWatcher) { try { transcriptWatcher.close(); } catch {} }
+  if (!transcriptPath) return;
+  try {
+    transcriptWatcher = fs.watch(transcriptPath, { persistent: false }, (eventType) => {
+      if (eventType === 'change') {
+        try { scanTranscriptForAgentWork(); } catch {}
+      }
+    });
+  } catch {}
+}
+
 // Track active agents for auto-completion detection
-const activeAgents: Map<string, { lastActivity: number; agentName: string; agentType: string }> = new Map();
+const activeAgents: Map<string, { lastActivity: number; startTime: number; agentName: string; agentType: string }> = new Map();
+let lastAgentStatusEpoch = 0;
 const AGENT_IDLE_TIMEOUT = 30_000; // 30 seconds without activity → auto "done"
 
 function findCurrentTranscript(): string | null {
@@ -353,6 +378,8 @@ function scanTranscriptForAgentWork(): void {
     if (found && found !== transcriptPath && (!transcriptPath || fs.statSync(found).size > (fs.statSync(transcriptPath).size * 0.5))) {
       transcriptPath = found;
       recordedToolIds.clear();
+      thinkingCache.clear();
+      setupTranscriptWatcher();
 
       // 새 세션 감지 → pending/in_progress task 무효화
       ensureHistoryFile();
@@ -575,8 +602,10 @@ function scanTranscriptForAgentWork(): void {
     // Update active agent tracking (exclude Chris — boss never "completes")
     for (const tool of latestPerAgent.values()) {
       if (tool.agentName === 'Chris') continue;
+      const existing = activeAgents.get(tool.agentName);
       activeAgents.set(tool.agentName, {
         lastActivity: Date.now(),
+        startTime: existing?.startTime || Date.now(),
         agentName: tool.agentName,
         agentType: tool.agentType,
       });
@@ -680,7 +709,7 @@ function scanTranscriptForAgentWork(): void {
   // Chris talk
   const nowEpoch = Math.floor(Date.now() / 1000);
 
-  if (nowEpoch - lastChrisTalkEpoch >= 30) {
+  if (nowEpoch - lastChrisTalkEpoch >= 15) {
     for (const line of lines) {
       try {
         const entry = JSON.parse(line);
@@ -711,7 +740,7 @@ function scanTranscriptForAgentWork(): void {
           let msg = meaningful.slice(0, 2)
             .map(l => l.replace(/\*\*/g, "").replace(/`/g, "").replace(/^\s*>\s*/, ""))
             .join(" ");
-          if (msg.length > 150) msg = msg.slice(0, 150) + "...";
+          if (msg.length > 500) msg = msg.slice(0, 500) + "...";
           if (msg.length < 8) continue;
 
           lastChrisTalkEpoch = nowEpoch;
@@ -732,7 +761,7 @@ function scanTranscriptForAgentWork(): void {
 
   // Chris thinking (from model's thinking blocks → 💭 thought bubbles, chunked)
   // Queue: extract all chunks from new thinking blocks, emit one per scan cycle
-  const thinkCondition = thinkQueue.length === 0 && nowEpoch - lastChrisTalkEpoch >= 6;
+  const thinkCondition = thinkQueue.length === 0 && nowEpoch - lastChrisTalkEpoch >= 3;
   console.log(`[think-debug] queue=${thinkQueue.length} gap=${nowEpoch - lastChrisTalkEpoch} lines=${lines.length} condition=${thinkCondition}`);
   if (thinkCondition) {
     for (const line of lines) {
@@ -741,8 +770,23 @@ function scanTranscriptForAgentWork(): void {
         if (entry.type !== "assistant" || entry.message?.role !== "assistant") continue;
         if (!entry.message?.content) continue;
 
+        const msgId = entry.message.id || '';
         for (const block of entry.message.content) {
-          if (block.type !== "thinking" || !block.thinking) continue;
+          if (block.type !== "thinking") continue;
+
+          // Thinking cache: transcript에서 redact되기 전에 캡처
+          if (block.thinking && block.thinking.length > 30) {
+            if (msgId && !thinkingCache.has(msgId)) {
+              thinkingCache.set(msgId, block.thinking);
+              console.log(`[think-cache] cached msgId=${msgId.slice(0,12)} len=${block.thinking.length}`);
+            }
+          } else if (!block.thinking && msgId && thinkingCache.has(msgId)) {
+            // Redacted → restore from cache
+            block.thinking = thinkingCache.get(msgId)!;
+            console.log(`[think-cache] RESTORED msgId=${msgId.slice(0,12)} len=${block.thinking.length}`);
+          }
+
+          if (!block.thinking) continue;
 
           console.log(`[think-debug] found thinking block, len=${block.thinking.length}`);
           const thinking: string = block.thinking.trim();
@@ -811,6 +855,28 @@ function scanTranscriptForAgentWork(): void {
     try { fs.appendFileSync(HISTORY_FILE, thinkEntry + '\n'); } catch {}
   }
 
+  // Chris: 활성 에이전트 진행 상태 보고 (20초마다)
+  if (activeAgents.size > 0 && nowEpoch - lastAgentStatusEpoch >= 20) {
+    const statuses: string[] = [];
+    for (const [name, info] of activeAgents) {
+      if (name === 'Chris') continue;
+      const elapsed = Math.floor((Date.now() - info.startTime) / 1000);
+      if (elapsed < 5) continue;
+      const timeStr = elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
+      statuses.push(`✻ ${name} 작업 중… (${timeStr})`);
+    }
+    if (statuses.length > 0) {
+      lastAgentStatusEpoch = nowEpoch;
+      const ts = new Date().toTimeString().slice(0, 8);
+      const statusEntry = JSON.stringify({
+        ts, epoch: nowEpoch, type: 'agent-status',
+        speaker: 'Chris', role: 'boss',
+        msg: statuses.join('\n'),
+      });
+      try { fs.appendFileSync(HISTORY_FILE, statusEntry + '\n'); } catch {}
+    }
+  }
+
   // ═══ Chris 대화록 챕터 로깅 ═══
   // 새 assistant 응답에서 thinking + text + tools를 하나의 챕터로 구조화
   // history.jsonl의 request 이벤트에서 최근 사용자 메시지 추출
@@ -830,11 +896,14 @@ function scanTranscriptForAgentWork(): void {
       } catch {}
     }
   } catch {}
+  let chapterAssistantCount = 0;
+  let chapterNewCount = 0;
   for (const line of lines) {
     try {
       const entry = JSON.parse(line);
 
       if (entry.type !== "assistant" || entry.message?.role !== "assistant") continue;
+      chapterAssistantCount++;
       if (!entry.message?.content) continue;
 
       const msgId = entry.message.id || '';
@@ -842,6 +911,7 @@ function scanTranscriptForAgentWork(): void {
       const chapterKey = `chapter:${msgId}`;
       if (recordedTextHashes.has(chapterKey)) continue;
       recordedTextHashes.add(chapterKey);
+      chapterNewCount++;
 
       let thinkLines: string[] = [];
       let responseText = '';
@@ -860,6 +930,10 @@ function scanTranscriptForAgentWork(): void {
       const agents: { type: string, desc: string }[] = [];
 
       for (const block of entry.message.content) {
+        // Thinking cache restore for chris-log
+        if (block.type === 'thinking' && !block.thinking && msgId && thinkingCache.has(msgId)) {
+          block.thinking = thinkingCache.get(msgId)!;
+        }
         if (block.type === 'thinking' && block.thinking) {
           const t = block.thinking.trim();
           const meaningful = t.split('\n')
@@ -970,6 +1044,9 @@ function scanTranscriptForAgentWork(): void {
 
       try { fs.appendFileSync(CHRIS_LOG_FILE, chapterEntry + '\n'); } catch {}
     } catch {}
+  }
+  if (chapterAssistantCount > 0 || chapterNewCount > 0) {
+    console.log(`[chris-log] assistant=${chapterAssistantCount} new=${chapterNewCount} lines=${lines.length}`);
   }
 
   // Prune
@@ -1086,8 +1163,10 @@ function scanSubagentFiles(): void {
       try { fs.appendFileSync(HISTORY_FILE, histEntry + "\n"); } catch {}
 
       // Track for auto-completion (so done events get generated after 30s idle)
+      const existing = activeAgents.get(tool.agentName);
       activeAgents.set(tool.agentName, {
         lastActivity: Date.now(),
+        startTime: existing?.startTime || Date.now(),
         agentName: tool.agentName,
         agentType: tool.agentType,
       });
@@ -1277,8 +1356,9 @@ async function handleMessage(req: Request): Promise<Response> {
 
 async function handleRoot(): Promise<Response> {
   try {
-    const file = Bun.file(HTML_FILE);
-    return new Response(file, {
+    let html = fs.readFileSync(HTML_FILE, "utf-8");
+    html = html.replace(/v2\.\d+(\.\d+)?/g, `v${PLUGIN_VERSION}`);
+    return new Response(html, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -1443,19 +1523,32 @@ const server = Bun.serve({
             if (doneLines.length > 0) {
               fs.appendFileSync(doneArchive, doneLines.join('\n') + '\n');
             }
-            // state + done + assign 보존 (pending/in_progress task는 제거, completed만 유지)
+            // completed된 task ID 수집 (해당 task-create도 보존하기 위해)
+            const completedTaskIds = new Set<string>();
+            for (const line of lines) {
+              try {
+                const e = JSON.parse(line);
+                if (e.type === 'task-update' && e.data?.status === 'completed' && e.data?.id) {
+                  completedTaskIds.add(e.data.id);
+                }
+              } catch {}
+            }
+
+            // state + done + assign 보존 (completed task의 create+update 쌍 유지)
             const preserved = lines.filter(line => {
               try {
                 const e = JSON.parse(line);
                 if (!preserveTypes.has(e.type)) return false;
-                // task-create/task-update 중 completed가 아닌 것은 제거
-                if ((e.type === 'task-create' || e.type === 'task-update') && e.data?.status !== 'completed') return false;
+                // task-create: completed된 task의 것만 보존
+                if (e.type === 'task-create') return completedTaskIds.has(e.data?.id);
+                // task-update: completed만 보존
+                if (e.type === 'task-update') return e.data?.status === 'completed';
                 return true;
               } catch { return false; }
             }).join('\n');
             fs.writeFileSync(HISTORY_FILE, preserved ? preserved + '\n' : '');
           }
-          if (fs.existsSync(CHRIS_LOG_FILE)) fs.writeFileSync(CHRIS_LOG_FILE, '');
+          // chris-log는 refresh해도 유지 (작업 이력은 보존)
           recordedTextHashes.clear();
           // 즉시 transcript 재스캔 → 현재 유효한 todo/doing task 갱신
           scanTranscriptForAgentWork();
@@ -1657,7 +1750,8 @@ async function processDialogueQueue(): Promise<void> {
         const cleanEnv = { ...process.env, BACKSTAGE_DIALOGUE: '1' };
         delete cleanEnv.CLAUDECODE;
 
-        const proc = Bun.spawn(['claude', '--print', '--model', 'haiku', '--plugin-dir', '/dev/null', prompt], {
+        // BACKSTAGE_DIALOGUE=1 환경변수로 hook 재귀 방지 (user-prompt-hook.sh에서 체크)
+        const proc = Bun.spawn(['claude', '--print', '--model', 'haiku', prompt], {
           stdout: 'pipe',
           stderr: 'pipe',
           env: cleanEnv,
@@ -1665,10 +1759,12 @@ async function processDialogueQueue(): Promise<void> {
         const killTimer = setTimeout(() => { try { proc.kill(); } catch {} }, 15_000);
 
         const output = await new Response(proc.stdout).text();
+        const stderr = await new Response(proc.stderr).text();
         await proc.exited;
         clearTimeout(killTimer);
 
-        if (!output.trim()) continue;
+        if (stderr.trim()) console.error('[dialogue] stderr:', stderr.trim().slice(0, 200));
+        if (!output.trim()) { console.log('[dialogue] empty output for:', entry.speaker); continue; }
 
         // JSON 추출
         let json: any = null;
@@ -1709,7 +1805,7 @@ async function processDialogueQueue(): Promise<void> {
 
 // ─── Timers ──────────────────────────────────────────────────────
 
-// Transcript scanner: every 3 seconds
+// Transcript scanner: every 2 seconds (thinking 캡처를 위해 빈도 증가)
 const transcriptScanTimer = setInterval(() => {
   try { scanTranscriptForAgentWork(); } catch {}
   // Usage API 주기적 갱신 (fire-and-forget, 자체 60초 캐시)
@@ -1717,7 +1813,7 @@ const transcriptScanTimer = setInterval(() => {
     usageData.fiveHourPercent = u.fiveHour;
     usageData.sevenDayPercent = u.sevenDay;
   }).catch(() => {});
-}, 3000);
+}, 2000);
 
 // Idle chat generator: every 20 seconds
 const idleChatTimer = setInterval(() => {

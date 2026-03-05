@@ -1436,11 +1436,18 @@ export class Renderer {
     const barW = 100;
     const barH = 10;
     const usageBarW = 100;
-    // Usage 계산 (input + cache_read + output = 실제 총 토큰 사용량)
-    const usageTotal = (ctxData.inputTokens || 0) + (ctxData.cacheReadTokens || 0) + (ctxData.outputTokens || 0);
-    const maxUsage = 50_000_000; // 50M (5h rate limit 기준)
-    const usageRatio = Math.min(1, usageTotal / maxUsage);
-    const usageLabel = formatK(usageTotal);
+    // Usage 계산: API 퍼센트 우선, 없으면 토큰 기반 폴백
+    const fiveHourPct = ctxData.fiveHourPercent;
+    let usageRatio, usageLabel;
+    if (fiveHourPct != null) {
+      usageRatio = Math.min(1, fiveHourPct / 100);
+      usageLabel = fiveHourPct + '%';
+    } else {
+      const usageTotal = (ctxData.inputTokens || 0) + (ctxData.cacheReadTokens || 0) + (ctxData.outputTokens || 0);
+      const maxUsage = 50_000_000;
+      usageRatio = Math.min(1, usageTotal / maxUsage);
+      usageLabel = formatK(usageTotal);
+    }
     const usageLabelW = ctx.measureText(' ' + usageLabel).width;
 
     const statsW = ctx.measureText(statsText).width + 12;

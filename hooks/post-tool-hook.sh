@@ -4,9 +4,32 @@
 # Backstage 비활성 상태면 즉시 종료 (토큰 절약)
 [ ! -f "$HOME/.claude/plugins/backstage/enabled" ] && exit 0
 
-HISTORY_FILE="$HOME/.claude/plugins/backstage/history.jsonl"
-ACTIVE_AGENT_FILE="$HOME/.claude/plugins/backstage/active-agent.json"
-DEBUG_LOG="$HOME/.claude/plugins/backstage/debug-hook.log"
+PLUGIN_DIR="${BACKSTAGE_DIR:-$HOME/.claude/plugins/backstage}"
+HISTORY_FILE="$PLUGIN_DIR/history.jsonl"
+ACTIVE_AGENT_FILE="$PLUGIN_DIR/active-agent.json"
+DEBUG_LOG="$PLUGIN_DIR/debug-hook.log"
+DIALOGUE_QUEUE_FILE="$PLUGIN_DIR/dialogue-queue.jsonl"
+C_TEAM_POOL_FILE="$PLUGIN_DIR/c-team-pool.json"
+
+# ── C-team 동적 풀 할당 함수 ──────────────────────────────────────
+get_cteam_char() {
+    local tool="$1"
+    [ ! -f "$C_TEAM_POOL_FILE" ] && echo '{}' > "$C_TEAM_POOL_FILE"
+    local existing=$(jq -r --arg t "$tool" '.[$t] // ""' "$C_TEAM_POOL_FILE" 2>/dev/null)
+    if [ -n "$existing" ] && [ "$existing" != "" ]; then
+        echo "$existing"
+        return
+    fi
+    local used=$(jq -r 'values[]' "$C_TEAM_POOL_FILE" 2>/dev/null)
+    for char in Mia Kai Zoe Liam Aria Noah Luna Owen; do
+        if ! echo "$used" | grep -qx "$char"; then
+            jq --arg t "$tool" --arg c "$char" '.[$t] = $c' "$C_TEAM_POOL_FILE" > "$C_TEAM_POOL_FILE.tmp" && mv "$C_TEAM_POOL_FILE.tmp" "$C_TEAM_POOL_FILE"
+            echo "$char"
+            return
+        fi
+    done
+    echo "Mia"
+}
 
 input=$(cat)
 tool_name=$(echo "$input" | jq -r '.tool_name // ""')
@@ -63,11 +86,45 @@ for m in re.finditer(r'\{', text):
     echo ""
 }
 
+# ── TaskCreate 이벤트 기록 ────────────────────────────────────────
+if [ "$tool_name" = "TaskCreate" ]; then
+    task_subject=$(echo "$input" | jq -r '.tool_input.subject // ""')
+    task_desc=$(echo "$input" | jq -r '.tool_input.description // ""')
+    # TaskCreate 결과에서 ID 추출 (예: "Task #4 created successfully")
+    task_id=$(echo "$input" | jq -r '.tool_response.content[0].text // ""' | grep -oE '#[0-9]+' | tr -d '#')
+
+    if [ -n "$task_subject" ]; then
+        ts=$(date '+%H:%M:%S')
+        epoch=$(date '+%s')
+
+        mkdir -p "$(dirname "$HISTORY_FILE")"
+        jq -nc --arg ts "$ts" --arg ep "$epoch" --arg id "$task_id" --arg subj "$task_subject" --arg desc "$task_desc" \
+            '{ts:$ts,epoch:($ep|tonumber),type:"task-create",speaker:"Board",role:"system",msg:"",data:{id:$id,status:"pending",subject:$subj,description:$desc}}' >> "$HISTORY_FILE"
+    fi
+fi
+
+# ── TaskUpdate 이벤트 기록 ────────────────────────────────────────
+if [ "$tool_name" = "TaskUpdate" ]; then
+    task_id=$(echo "$input" | jq -r '.tool_input.taskId // ""')
+    task_status=$(echo "$input" | jq -r '.tool_input.status // ""')
+    task_subject=$(echo "$input" | jq -r '.tool_input.subject // ""')
+
+    # status가 있을 때만 기록 (의미 있는 상태 변경)
+    if [ -n "$task_status" ]; then
+        ts=$(date '+%H:%M:%S')
+        epoch=$(date '+%s')
+
+        mkdir -p "$(dirname "$HISTORY_FILE")"
+        jq -nc --arg ts "$ts" --arg ep "$epoch" --arg id "$task_id" --arg st "$task_status" --arg subj "$task_subject" \
+            '{ts:$ts,epoch:($ep|tonumber),type:"task-update",speaker:"Board",role:"system",msg:"",data:{id:$id,status:$st,subject:$subj}}' >> "$HISTORY_FILE"
+    fi
+fi
+
 # ── dialogue-generator Task 결과 처리 ────────────────────────────
 if [ "$tool_name" = "Task" ]; then
     agent_type=$(echo "$input" | jq -r '.tool_input.subagent_type // .tool_input.agent // "unknown"')
 
-    if [ "$agent_type" = "dialogue-generator" ]; then
+    if echo "$agent_type" | grep -q "dialogue-generator"; then
         echo "[$(date '+%H:%M:%S')] DIALOGUE-GEN detected! extracting result..." >> "$DEBUG_LOG"
         tool_result=$(echo "$input" | jq -r '.tool_response.content[0].text // ""')
         echo "[$(date '+%H:%M:%S')] tool_result length=${#tool_result} first80=$(echo "$tool_result" | head -c 80)" >> "$DEBUG_LOG"
@@ -162,7 +219,7 @@ fi
 if [ "$tool_name" = "Task" ]; then
     agent_type=$(echo "$input" | jq -r '.tool_input.subagent_type // "unknown"')
 
-    if [ "$agent_type" != "dialogue-generator" ]; then
+    if ! echo "$agent_type" | grep -q "dialogue-generator"; then
         case "$agent_type" in
             explore|explore-medium) agent_name="Jake" ;;
             oracle|oracle-medium) agent_name="David" ;;
@@ -184,71 +241,98 @@ if [ "$tool_name" = "Task" ]; then
         # 실제 결과 요약 추출 (첫 300자)
         result_text=$(echo "$input" | jq -r '.tool_response.content[0].text // ""' | head -c 300)
 
-        jq -n --arg agent "$agent_name" --arg atype "$agent_type" --arg task "$description" --arg result "$result_text" '{
-          "hookSpecificOutput": {
-            "hookEventName": "PostToolUse",
-            "additionalContext": ("🎬 COMPLETE: dialogue-generator(sonnet)로 완료 대화 생성:\ntype: complete\nagent: " + $agent + "\nagent_type: " + $atype + "\ntask: " + $task + "\nresult: " + $result + "\n\nJSON만: {\"lines\": [{\"speaker\": \"agent\", \"msg\": \"...\"}, {\"speaker\": \"boss\", \"msg\": \"...\"}]}")
-          }
-        }'
+        # 큐에 대화 생성 요청 기록 (server.ts가 소비)
+        mkdir -p "$(dirname "$DIALOGUE_QUEUE_FILE")"
+        jq -nc --arg ep "$(date +%s)" --arg speaker "$agent_name" --arg role "$agent_type" --arg task "$description" --arg dtype "complete" \
+            '{epoch:($ep|tonumber),speaker:$speaker,role:$role,type:$dtype,prompt:("IT스타트업 " + $speaker + "(" + $role + ")가 작업 완료: " + $task + ". 완료 보고 한마디. 15-25자 한국어. JSON만: {\"lines\":[{\"speaker\":\"" + $speaker + "\",\"msg\":\"대사\"}]}")}' >> "$DIALOGUE_QUEUE_FILE"
         exit 0
     fi
 fi
 
-# ── 일반 도구 완료 요약 (Edit/Write/Bash) ────────────────────────
+# ── 일반 도구 완료 요약 (C-Team 동적 풀 할당 + 말풍선) ────────────────────
 case "$tool_name" in
-    Edit)
-        file=$(echo "$input" | jq -r '.tool_input.file_path // ""' | xargs basename 2>/dev/null)
-        [ -n "$file" ] && {
-            ts=$(date '+%H:%M:%S'); ep=$(date '+%s')
-            old_str=$(echo "$input" | jq -r '.tool_input.old_string // ""' | head -c 200)
-            new_str=$(echo "$input" | jq -r '.tool_input.new_string // ""' | head -c 200)
-            detail="- ${old_str}
+    Read|Edit|Grep|Glob|Write|Bash)
+        c_char=$(get_cteam_char "$tool_name")
+        c_role="c-$(echo "$tool_name" | tr 'A-Z' 'a-z')"
+        ts=$(date '+%H:%M:%S'); ep=$(date '+%s')
+
+        case "$tool_name" in
+            Read)
+                file=$(echo "$input" | jq -r '.tool_input.file_path // ""' | xargs basename 2>/dev/null)
+                [ -n "$file" ] && \
+                jq -nc --arg ts "$ts" --arg ep "$ep" --arg sp "$c_char" --arg role "$c_role" --arg file "$file" \
+                    '{ts:$ts,epoch:($ep|tonumber),type:"work-done",speaker:$sp,role:$role,msg:("📖\n" + $file)}' >> "$HISTORY_FILE"
+                ;;
+            Edit)
+                file=$(echo "$input" | jq -r '.tool_input.file_path // ""' | xargs basename 2>/dev/null)
+                [ -n "$file" ] && {
+                    old_str=$(echo "$input" | jq -r '.tool_input.old_string // ""' | head -c 200)
+                    new_str=$(echo "$input" | jq -r '.tool_input.new_string // ""' | head -c 200)
+                    detail="- ${old_str}
 + ${new_str}"
-            jq -nc --arg ts "$ts" --arg ep "$ep" --arg file "$file" --arg detail "$detail" \
-                '{ts:$ts,epoch:($ep|tonumber),type:"work-done",speaker:"Chris",role:"boss",msg:("✏️ " + $file + " 수정 완료"),detail:$detail}' >> "$HISTORY_FILE"
-        }
-        ;;
-    Write)
-        file=$(echo "$input" | jq -r '.tool_input.file_path // ""' | xargs basename 2>/dev/null)
-        [ -n "$file" ] && {
-            ts=$(date '+%H:%M:%S'); ep=$(date '+%s')
-            jq -nc --arg ts "$ts" --arg ep "$ep" --arg file "$file" \
-                '{ts:$ts,epoch:($ep|tonumber),type:"work-done",speaker:"Chris",role:"boss",msg:("📝 " + $file + " → 작성 완료")}' >> "$HISTORY_FILE"
-        }
-        ;;
-    Bash)
-        cmd=$(echo "$input" | jq -r '.tool_input.command // ""' | head -c 60)
-        [ -n "$cmd" ] && {
-            ts=$(date '+%H:%M:%S'); ep=$(date '+%s')
-            output=$(echo "$input" | jq -r '.tool_response.content[0].text // ""' | head -c 500)
-            # 요약: 마지막 의미있는 줄
-            summary=$(echo "$output" | grep -v '^$' | tail -1 | head -c 80)
-            [ -z "$summary" ] && summary="실행 완료"
-            jq -nc --arg ts "$ts" --arg ep "$ep" --arg cmd "$cmd" --arg summary "$summary" --arg detail "$output" \
-                '{ts:$ts,epoch:($ep|tonumber),type:"work-done",speaker:"Chris",role:"boss",msg:("💻 " + $cmd + " → " + $summary),detail:$detail}' >> "$HISTORY_FILE"
-        }
+                    jq -nc --arg ts "$ts" --arg ep "$ep" --arg sp "$c_char" --arg role "$c_role" --arg file "$file" --arg detail "$detail" \
+                        '{ts:$ts,epoch:($ep|tonumber),type:"work-done",speaker:$sp,role:$role,msg:("✏️\n" + $file),detail:$detail}' >> "$HISTORY_FILE"
+                }
+                ;;
+            Grep)
+                pattern=$(echo "$input" | jq -r '.tool_input.pattern // ""' | head -c 30)
+                [ -n "$pattern" ] && \
+                jq -nc --arg ts "$ts" --arg ep "$ep" --arg sp "$c_char" --arg role "$c_role" --arg pat "$pattern" \
+                    '{ts:$ts,epoch:($ep|tonumber),type:"work-done",speaker:$sp,role:$role,msg:("🔎\n" + $pat)}' >> "$HISTORY_FILE"
+                ;;
+            Glob)
+                pattern=$(echo "$input" | jq -r '.tool_input.pattern // ""' | head -c 30)
+                [ -n "$pattern" ] && \
+                jq -nc --arg ts "$ts" --arg ep "$ep" --arg sp "$c_char" --arg role "$c_role" --arg pat "$pattern" \
+                    '{ts:$ts,epoch:($ep|tonumber),type:"work-done",speaker:$sp,role:$role,msg:("🔍\n" + $pat)}' >> "$HISTORY_FILE"
+                ;;
+            Write)
+                file=$(echo "$input" | jq -r '.tool_input.file_path // ""' | xargs basename 2>/dev/null)
+                [ -n "$file" ] && \
+                jq -nc --arg ts "$ts" --arg ep "$ep" --arg sp "$c_char" --arg role "$c_role" --arg file "$file" \
+                    '{ts:$ts,epoch:($ep|tonumber),type:"work-done",speaker:$sp,role:$role,msg:("📝\n" + $file)}' >> "$HISTORY_FILE"
+                ;;
+            Bash)
+                cmd=$(echo "$input" | jq -r '.tool_input.command // ""' | head -c 60)
+                [ -n "$cmd" ] && {
+                    output=$(echo "$input" | jq -r '.tool_response.content[0].text // ""' | head -c 500)
+                    summary=$(echo "$output" | grep -v '^$' | tail -1 | head -c 80)
+                    [ -z "$summary" ] && summary="완료"
+                    jq -nc --arg ts "$ts" --arg ep "$ep" --arg sp "$c_char" --arg role "$c_role" --arg cmd "$cmd" --arg summary "$summary" --arg detail "$output" \
+                        '{ts:$ts,epoch:($ep|tonumber),type:"work-done",speaker:$sp,role:$role,msg:("💻\n" + $cmd),detail:$detail}' >> "$HISTORY_FILE"
+                }
+                ;;
+        esac
         ;;
 esac
 
-# ── C-Team AI 대화 + 데이터 (매 3번째 도구, dialogue-generator로 유머 전달) ──
-PLUGIN_DIR="${BACKSTAGE_DIR:-$HOME/.claude/plugins/backstage}"
-C_COUNTER_FILE="$PLUGIN_DIR/c-bubble-counter.txt"
+# ── C-Team AI 대화 + 데이터 (도구별 3번째마다, 각 도구 담당 캐릭터가 대화) ──
+C_COUNTER_DIR="$PLUGIN_DIR/c-counters"
+mkdir -p "$C_COUNTER_DIR"
 
 case "$tool_name" in
     Read|Edit|Grep|Glob|Write|Bash)
+        # 도구별 개별 카운터 (Read 3번째→Liam, Bash 3번째→Zoe 등 분산)
+        C_COUNTER_FILE="$C_COUNTER_DIR/$tool_name.txt"
         counter=0
         [ -f "$C_COUNTER_FILE" ] && counter=$(cat "$C_COUNTER_FILE" 2>/dev/null)
         counter=$((counter + 1))
         echo "$counter" > "$C_COUNTER_FILE"
 
         if [ $((counter % 3)) -eq 0 ]; then
-            case "$tool_name" in
-                Read) c_name="Mia"; c_role="c-read"; c_desc="밝고 호기심 많음. 데이터 보면 흥분. ㅋㅋ 잘 씀" ;;
-                Edit) c_name="Kai"; c_role="c-edit"; c_desc="코드 장인. 깔끔함 집착. 변경에 예민" ;;
-                Grep) c_name="Zoe"; c_role="c-grep"; c_desc="검색 달인. 패턴 발견하면 흥분. 분석적" ;;
-                Glob) c_name="Liam"; c_role="c-glob"; c_desc="파일 정리광. 구조 파악 전문. 체계적" ;;
-                Write) c_name="Aria"; c_role="c-write"; c_desc="창작 좋아함. 새 파일에 설렘. 덮어쓰기엔 긴장" ;;
-                Bash) c_name="Noah"; c_role="c-bash"; c_desc="실행 담당. 빌드/테스트에 진심. 결과에 일희일비" ;;
+            c_name=$(get_cteam_char "$tool_name")
+            c_role="c-$(echo "$tool_name" | tr 'A-Z' 'a-z')"
+            # 캐릭터별 성격 (동적 할당이지만 캐릭터 성격은 고유)
+            case "$c_name" in
+                Mia) c_desc="밝고 호기심 많음. 데이터 보면 흥분. ㅋㅋ 잘 씀" ;;
+                Kai) c_desc="코드 장인. 깔끔함 집착. 변경에 예민" ;;
+                Zoe) c_desc="검색 달인. 패턴 발견하면 흥분. 분석적" ;;
+                Liam) c_desc="파일 정리광. 구조 파악 전문. 체계적" ;;
+                Aria) c_desc="창작 좋아함. 새 파일에 설렘. 덮어쓰기엔 긴장" ;;
+                Noah) c_desc="실행 담당. 빌드/테스트에 진심. 결과에 일희일비" ;;
+                Luna) c_desc="꼼꼼한 관찰자. 디테일에 강함. 조용하지만 날카로움" ;;
+                Owen) c_desc="에너지 넘침. 새로운 거 좋아함. 낙관적" ;;
+                *) c_desc="IT 스타트업 팀원. 밝고 유쾌함" ;;
             esac
 
             # Python으로 실제 데이터 추출 → dialogue-generator AI에 전달할 요약
@@ -352,13 +436,10 @@ print(", ".join(info) if info else "")
 ' 2>/dev/null)
 
             if [ -n "$data_summary" ]; then
-                # additionalContext로 dialogue-generator AI 호출 요청 (데이터 + 유머)
-                jq -nc --arg name "$c_name" --arg role "$c_role" --arg desc "$c_desc" --arg data "$data_summary" '{
-                    hookSpecificOutput: {
-                        hookEventName: "PostToolUse",
-                        additionalContext: ("[C-TEAM] dialogue-generator(sonnet)로 C-team 대사 생성해주세요:\ntype: c-bubble\nagent: " + $name + "\nagent_type: " + $role + "\n[상황] " + $name + "이(가) 도구 결과 데이터를 보고 IT 스타트업 동료답게 한마디.\n[데이터] " + $data + "\n[성격] " + $desc + "\n[필수] 실제 데이터를 자연스럽고 유머러스하게 전달. 15-30자. ㅋㅋ/ㅎㅎ OK.\n[금지] 보고서 말투, 30자 초과, 기술 용어 나열\nJSON만: {\"lines\": [{\"speaker\": \"" + $name + "\", \"msg\": \"...\"}]}")
-                    }
-                }'
+                # 큐에 C-team 대화 생성 요청 기록 (server.ts가 소비)
+                mkdir -p "$(dirname "$DIALOGUE_QUEUE_FILE")"
+                jq -nc --arg ep "$(date +%s)" --arg speaker "$c_name" --arg role "$c_role" --arg data "$data_summary" --arg desc "$c_desc" --arg dtype "c-bubble" \
+                    '{epoch:($ep|tonumber),speaker:$speaker,role:$role,type:$dtype,prompt:("IT스타트업 " + $speaker + "(" + $desc + ")가 이 상황을 보고 한마디: " + $data + ". 15-30자 한국어. JSON만: {\"lines\":[{\"speaker\":\"" + $speaker + "\",\"msg\":\"대사\"}]}")}' >> "$DIALOGUE_QUEUE_FILE"
             fi
         fi
         ;;
