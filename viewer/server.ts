@@ -198,18 +198,18 @@ let lastIdleChatTime = Date.now();
 
 async function generateIdleChat(): Promise<void> {
   const now = Date.now();
-  if (now - lastIdleChatTime < 20_000) return;
+
+  // AI 대화 ON이면 폴백 대사 비활성화 → AI 대기실 대화만 사용
+  if (config.ai_dialogue) return;
+
+  // AI 대화 OFF: 40초 간격 폴백 대사
+  if (now - lastIdleChatTime < 40_000) return;
   lastIdleChatTime = now;
 
   const names = Object.keys(AGENT_PERSONALITIES);
   const name = names[Math.floor(Math.random() * names.length)];
   const role = NAME_TO_ROLE[name] || 'agent';
-  let msg: string | null = null;
-
-  // Predefined idle chat (callClaudeCLI 제거 — 동작 불안정)
-  if (!msg) {
-    msg = IDLE_CHATS[Math.floor(Math.random() * IDLE_CHATS.length)];
-  }
+  const msg = IDLE_CHATS[Math.floor(Math.random() * IDLE_CHATS.length)];
 
   const ts = new Date().toTimeString().slice(0, 8);
   const epoch = Math.floor(Date.now() / 1000);
@@ -220,6 +220,86 @@ async function generateIdleChat(): Promise<void> {
 
   ensureHistoryFile();
   try { fs.appendFileSync(HISTORY_FILE, entry + '\n'); } catch {}
+}
+
+// ─── 랜덤 분위기 (프롬프트 다양화) ─────────────────────────────
+const MOODS_KO = ['급박함', '여유있음', '짜증남', '졸림', '신남', '허탈함', '배고픔', '카페인 과다', '월요병', '금요일 설렘', '야근 체념', '코드 잘 돌아서 기분좋음', '버그 발견해서 멘붕', '점심 뭐먹지 고민'];
+const MOODS_EN = ['rushed', 'relaxed', 'annoyed', 'sleepy', 'excited', 'defeated', 'hungry', 'over-caffeinated', 'Monday blues', 'Friday vibes', 'overtime resigned', 'code works feeling great', 'found a bug panicking', 'lunch dilemma'];
+function randomMood(): string {
+  const moods = config.language === 'ko' ? MOODS_KO : MOODS_EN;
+  return moods[Math.floor(Math.random() * moods.length)];
+}
+
+// ─── AI Idle Chat Generator (Break Room — 1분 간격 AI 대화) ─────
+let lastAiIdleChatTime = 0;
+
+async function generateAiIdleChat(): Promise<void> {
+  if (!config.ai_dialogue) return;
+  const now = Date.now();
+  if (now - lastAiIdleChatTime < 60_000) return;
+  lastAiIdleChatTime = now;
+
+  // 대기실에 있는 캐릭터 2명 랜덤 선택
+  const names = Object.keys(AGENT_PERSONALITIES);
+  const shuffled = names.sort(() => Math.random() - 0.5);
+  const char1 = shuffled[0];
+  const char2 = shuffled[1] || shuffled[0];
+
+  // i18n 프롬프트 로드
+  const i18nPath = path.join(PLUGIN_DIR, `hooks-i18n/${config.language || 'en'}.json`);
+  let i18nData: any = {};
+  try { i18nData = JSON.parse(fs.readFileSync(i18nPath, 'utf-8')); } catch {}
+
+  const desc1 = i18nData?.c_team?.[char1] || i18nData?.c_team?._default || 'IT startup team member';
+  const desc2 = i18nData?.c_team?.[char2] || i18nData?.c_team?._default || 'IT startup team member';
+
+  const mood = randomMood();
+  const prompt = config.language === 'ko'
+    ? `IT스타트업 휴게실. ${char1}(${desc1})와 ${char2}(${desc2})가 잡담 중. 현재 분위기: ${mood}. 아재개그/야근드립 필수, 각자 딱 1번씩만, 20-40자/줄, 한국어. JSON만: {"lines":[{"speaker":"${char1}","msg":".."},{"speaker":"${char2}","msg":".."}]}`
+    : `IT startup break room. ${char1}(${desc1}) and ${char2}(${desc2}) chatting. Mood: ${mood}. Dad jokes + dev humor, each speaks exactly once, 20-40 chars/line. JSON only: {"lines":[{"speaker":"${char1}","msg":".."},{"speaker":"${char2}","msg":".."}]}`;
+
+  // dialogue-queue에 추가 (processDialogueQueue가 처리)
+  const queueEntry = JSON.stringify({
+    epoch: Math.floor(now / 1000),
+    speaker: char1,
+    role: 'idle',
+    type: 'idle-chat',
+    prompt,
+  });
+  try { fs.appendFileSync(DIALOGUE_QUEUE_FILE, queueEntry + '\n'); } catch {}
+}
+
+// ─── C-Team 주기적 대화 (1분 간격, 작업 중 드립) ─────────────────
+let lastCTeamChatTime = 0;
+
+async function generateCTeamChat(): Promise<void> {
+  if (!config.ai_dialogue) return;
+  const now = Date.now();
+  if (now - lastCTeamChatTime < 60_000) return;
+  lastCTeamChatTime = now;
+
+  const cTeamNames = ['Mia', 'Kai', 'Zoe', 'Liam', 'Aria', 'Noah', 'Luna', 'Owen'];
+  const char = cTeamNames[Math.floor(Math.random() * cTeamNames.length)];
+
+  const i18nPath = path.join(PLUGIN_DIR, `hooks-i18n/${config.language || 'en'}.json`);
+  let i18nData: any = {};
+  try { i18nData = JSON.parse(fs.readFileSync(i18nPath, 'utf-8')); } catch {}
+
+  const desc = i18nData?.c_team?.[char] || i18nData?.c_team?._default || 'IT startup team member';
+
+  const mood = randomMood();
+  const prompt = config.language === 'ko'
+    ? `IT스타트업. ${char}(${desc}) 무한노동 중 한마디. 현재 분위기: ${mood}. 아재개그/야근드립 필수, Chris(팀장)와 딱 1번씩, 20-40자/줄, 한국어. JSON만: {"lines":[{"speaker":"boss","msg":".."},{"speaker":"${char}","msg":".."}]}`
+    : `IT startup. ${char}(${desc}) working non-stop. Mood: ${mood}. Dad jokes + overtime humor, exchange with Chris(boss) exactly once each, 20-40 chars/line. JSON only: {"lines":[{"speaker":"boss","msg":".."},{"speaker":"${char}","msg":".."}]}`;
+
+  const queueEntry = JSON.stringify({
+    epoch: Math.floor(now / 1000),
+    speaker: char,
+    role: 'c-team',
+    type: 'c-bubble',
+    prompt,
+  });
+  try { fs.appendFileSync(DIALOGUE_QUEUE_FILE, queueEntry + '\n'); } catch {}
 }
 
 // ─── Transcript Scanner (Agent Work Detection) ─────────────────
@@ -982,7 +1062,7 @@ function scanTranscriptForAgentWork(): void {
           const raw = entry.message.content.trim();
           // system-reminder 등 제거
           const cleaned = raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
-          if (cleaned.length >= 3 && !cleaned.startsWith('<') && !cleaned.startsWith('{') && !isHookDialogue(cleaned)) {
+          if (cleaned.length > 0 && !cleaned.startsWith('<') && !cleaned.startsWith('{') && !isHookDialogue(cleaned)) {
             chapterUserMsg = cleaned.slice(0, 500);
           }
         } else {
@@ -990,7 +1070,7 @@ function scanTranscriptForAgentWork(): void {
             if (block.type === "text" && block.text) {
               const raw = block.text.trim();
               const cleaned = raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
-              if (cleaned.length >= 3 && !isHookDialogue(cleaned)) { chapterUserMsg = cleaned.slice(0, 500); break; }
+              if (cleaned.length > 0 && !isHookDialogue(cleaned)) { chapterUserMsg = cleaned.slice(0, 500); break; }
             }
           }
         }
@@ -2053,6 +2133,7 @@ async function processDialogueQueue(): Promise<void> {
           const role = rawSpeaker === 'boss' ? 'boss' : (entry.role || 'agent');
           const evType = entry.type === 'complete' ? 'done'
             : entry.type === 'assign' ? 'assign'
+            : entry.type === 'idle-chat' ? 'idle-chat'
             : 'c-bubble';
 
           const writeEntry = () => {
@@ -2097,9 +2178,11 @@ const usageRefreshTimer = setInterval(() => {
   try { scanTranscriptUsage(); } catch {}
 }, 30_000);
 
-// Idle chat generator: every 20 seconds
+// Idle chat generator: fallback every 40s (AI OFF) + AI idle/c-team every 60s (AI ON)
 const idleChatTimer = setInterval(() => {
   try { generateIdleChat(); } catch {}
+  try { generateAiIdleChat(); } catch {}
+  try { generateCTeamChat(); } catch {}
 }, 20_000);
 
 // [C] Team activation: every 3 seconds

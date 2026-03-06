@@ -161,7 +161,7 @@ This feature uses `claude --print` with Haiku for fast, cheap dialogue generatio
 
 ```bash
 # In Claude Code
-/backstage:config
+/backstage:configure
 # → Toggle "AI Dialogue" on/off
 ```
 
@@ -254,7 +254,7 @@ Characters are automatically assigned based on agent type. When more agents are 
 
 ## Configuration
 
-Run `/backstage:config` in Claude Code to configure:
+Run `/backstage:configure` in Claude Code to configure:
 
 | Setting | Options | Default | Description |
 |---------|---------|---------|-------------|
@@ -288,7 +288,7 @@ claude-backstage/
 │   └── i18n/                    # Hook-side translations
 ├── skills/
 │   ├── server/SKILL.md          # /backstage:server command
-│   └── config/SKILL.md          # /backstage:config command
+│   └── configure/SKILL.md       # /backstage:configure command
 ├── viewer/
 │   ├── server.ts                # Bun SSE server (port 7777)
 │   ├── index.html               # Entry point
