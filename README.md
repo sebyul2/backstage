@@ -1,93 +1,314 @@
-# Claude Backstage
+<p align="center">
+  <img src="docs/screenshots/full-office.png" alt="Claude Backstage - Pixel Art Office Viewer" width="800">
+</p>
 
-Claude Code에서 서브에이전트 호출 시 판교 IT 스타트업 오피스 분위기의 AI 대화를 생성하는 플러그인.
+<h1 align="center">Claude Backstage</h1>
 
-## 설치
+<p align="center">
+  <strong>Watch your AI agents work in a Gather Town-style pixel art office</strong>
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#how-it-works">How It Works</a> •
+  <a href="#characters">Characters</a> •
+  <a href="#configuration">Configuration</a> •
+  <a href="#architecture">Architecture</a>
+</p>
+
+---
+
+**Claude Backstage** is a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that transforms your terminal AI workflow into a living, breathing pixel art startup office.
+
+When Claude delegates work to sub-agents, each one becomes a character — they walk to their desk, sit down, code away, and head to the break room when they're done. All in real time, all in pixel art.
+
+> Bored between tasks? Wander around the office and press **Spacebar** — your character might have something to say.
+
+---
+
+## Features
+
+### The Office
+
+<img src="docs/screenshots/full-office.png" alt="Full Office View" width="700">
+
+The office is split into two zones: the **workspace** on the left and the **break room** on the right, connected by a doorway. Characters navigate around furniture using A* pathfinding, bump into each other (with stun physics!), and idle in the break room between tasks.
+
+The **status bar** at the top shows token usage, API quota, active agent count, and session info at a glance.
+
+The **chat panel** on the right streams everything happening in real time — user requests, agent activity, completions, idle banter, and task updates — all color-coded by character.
+
+---
+
+### Task Dashboard
+
+<img src="docs/screenshots/task-detail.png" alt="Task Dashboard" width="700">
+
+The dashboard board in the top-left corner tracks all tasks in the current session, organized into **TODO**, **DOING**, and **DONE** columns.
+
+- Click any task to see its **full description** in a detail popup
+- Tasks with linked plans show a **Plan** button to jump straight to the plan viewer
+- Status updates flow in automatically from Claude's `TaskCreate` / `TaskUpdate` calls
+- Hit **Refresh** to clean up completed work and start fresh
+
+---
+
+### Chris Work Notes
+
+<img src="docs/screenshots/chris-notes-list.png" alt="Chris Work Notes - List" width="500">
+
+Click on **Chris** (the boss character) to open the work notes panel. This is a structured log of your entire Claude session — every user request and the AI's response, organized chronologically.
+
+<img src="docs/screenshots/chris-notes-detail.png" alt="Chris Work Notes - Detail" width="500">
+
+Expand any entry to see the full detail:
+
+- **Thinking** — Claude's internal reasoning process (the "thought bubbles" you see on Chris)
+- **Response** — What Claude actually said back
+- **Tool calls** — Every Read, Edit, Bash, Grep call with arguments
+- **Sub-agents** — Which agents were spawned and what they did
+
+It's like having a full audit trail of your AI session, presented as your team lead's work diary.
+
+---
+
+### Plan History
+
+<img src="docs/screenshots/plan-viewer.png" alt="Plan Viewer" width="700">
+
+The **Plans** panel lets you browse all plans created across sessions — implementation strategies, architecture decisions, refactoring roadmaps.
+
+- Plans are listed on the left with title, date, and file size
+- Click any plan to view its **full rendered Markdown** on the right
+- Plans persist across sessions, so you can always revisit past decisions
+
+---
+
+### Sub-Agent Characters
+
+Chris doesn't do the work himself. When tasks come in, he delegates to his team — and you get to watch them in action:
+
+1. **Agent spawns** → A character is assigned (Jake, David, Sophie, etc.)
+2. **Walks to their desk** → Pathfinding around furniture and other characters
+3. **Works** → Speech bubbles show what file they're reading, editing, or searching
+4. **Finishes** → Completion message in chat, then they wander to the break room
+5. **Idle time** → Characters chat, get coffee, or just hang out until the next task
+
+Chris's **direct team** (C-Team: Mia, Kai, Zoe, Liam, Aria, Noah, Luna, Owen) handles the tool calls that the main agent makes — reading files, running grep, editing code. They sit at their desks on the left side of the office and show exactly what tool is being used and on which file.
+
+> In reality it's all the main Claude agent, but it's way more fun to watch Kai obsess over clean code while Luna worries about security.
+
+---
+
+### AI-Generated Dialogue
+
+When agents complete tasks or use tools, an AI generates natural office banter. Characters react to what's happening — celebrating bug fixes, complaining about technical debt, or just chatting about lunch.
+
+This feature uses `claude --print` with Haiku for fast, cheap dialogue generation. You can turn it on or off:
 
 ```bash
-git clone git@bitbucket.org:spooncast/claude-backstage.git
+# In Claude Code
+/backstage:config
+# → Toggle "AI Dialogue" on/off
+```
+
+When **off**, characters still move around and work — they just don't chat. The office stays alive, just quieter.
+
+---
+
+## Installation
+
+### Prerequisites
+
+| Tool | Purpose |
+|------|---------|
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | CLI for Claude |
+| [Bun](https://bun.sh) | Server runtime |
+| [jq](https://jqlang.github.io/jq/) | JSON processing in hooks |
+
+### Install
+
+```bash
+git clone https://github.com/anthropics/claude-backstage.git
 cd claude-backstage
 ./install.sh
 ```
 
-설치 후 Claude Code에서:
+### Start the viewer
+
+In Claude Code, run:
 ```
-backstage start
+/backstage:server on
 ```
 
-## 제거
+Then open **http://localhost:7777** in your browser. That's it — the office is open for business.
+
+The server starts automatically when you run the command, and shuts down after 10 minutes of inactivity (no browser tabs open).
+
+### Uninstall
 
 ```bash
-cd claude-backstage
 ./uninstall.sh
 ```
 
-## 의존성
+Removes all plugin files, hooks, cache, and configuration cleanly. No leftovers.
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- [bun](https://bun.sh) - viewer 서버 실행
-- [jq](https://jqlang.github.io/jq/) - JSON 처리
+---
 
-## 작동 방식
+## How It Works
 
-1. 메인 Claude가 `Task` (서브에이전트) 호출 시
-2. 동시에 `dialogue-generator` 에이전트를 병렬 호출
-3. AI가 IT 스타트업 슬랙 대화 스타일의 JSON 생성
-4. `PostToolUse` hook이 결과를 파싱하여 `history.jsonl`에 기록
-5. Viewer (웹 UI)가 실시간으로 대화 표시
-
-## Viewer (웹 UI)
-
-`http://localhost:7777`에서 실시간 대화를 확인할 수 있습니다.
-
-```bash
-# 시작
-backstage start    # Claude Code 내에서
-
-# 또는 수동으로
-cd viewer && bun run server.ts
+```
+ You type a prompt
+      │
+      ▼
+ ┌─────────────────────┐
+ │  UserPromptSubmit   │──▶ history.jsonl (type: request)
+ │  hook               │    → "You" bubble in viewer
+ └─────────┬───────────┘
+           ▼
+ ┌─────────────────────┐
+ │  Claude uses tools  │──▶ PreToolUse hook
+ │  (Read, Edit, Bash) │    → C-Team characters show work
+ └─────────┬───────────┘
+           ▼
+ ┌─────────────────────┐
+ │  Claude spawns      │──▶ Each Agent = a character
+ │  sub-agents (Agent) │    → Walks to desk, works, reports
+ └─────────┬───────────┘
+           ▼
+ ┌─────────────────────┐
+ │  PostToolUse hook   │──▶ Records completions
+ │                     │──▶ Queues AI dialogue generation
+ └─────────┬───────────┘
+           ▼
+ ┌─────────────────────┐
+ │  server.ts (Bun)    │──▶ SSE stream to browser
+ │  port 7777          │──▶ Transcript → Chris Work Notes
+ └─────────┬───────────┘    └▶ Dialogue queue → Haiku
+           ▼
+ ┌─────────────────────┐
+ │  Viewer (Canvas)    │    Pixel art office with
+ │  index.html + JS    │    characters, bubbles, chat
+ └─────────────────────┘
 ```
 
-기능:
-- SSE 기반 실시간 업데이트
-- 사용자 요청 / 에이전트 작업 대화 표시
-- 캐릭터별 아이콘 및 말풍선 UI
+---
 
-## 캐릭터
+## Characters
 
-| 에이전트 타입 | 이름 | 성격 |
-|---------------|------|------|
-| explore | Jake | 신입 1년차, 열정적이고 호기심 많음 |
-| oracle | David | 10년차 시니어, 쿨하고 간결 |
-| sisyphus-junior | Kevin | 성실한 2년차, 묵묵히 일함 |
-| frontend-engineer | Sophie | 디자인 감각, 깔끔함 추구 |
-| document-writer | Emily | 꼼꼼하고 정리 잘함 |
-| librarian | Michael | 조용하고 박학다식 |
-| prometheus | Alex | 전략적 사고, 큰 그림 |
-| qa-tester | Sam | 꼼꼼, 버그 찾으면 기뻐함 |
+### The Boss
 
-## 구조
+| Character | Role | What they show |
+|-----------|------|----------------|
+| **Chris** | Team Lead | Your Claude session — thinking bubbles, responses, decisions. Click to see work notes. |
+
+### Agent Team
+
+When Claude spawns sub-agents, they become these characters (assigned in order, regardless of agent type):
+
+| Character | Personality |
+|-----------|-------------|
+| **Jake** | 1-year junior, enthusiastic and curious |
+| **David** | 10-year senior, cool and concise |
+| **Kevin** | Diligent 2nd year, quietly gets things done |
+| **Sophie** | Design-focused, loves clean code |
+| **Emily** | Detail-oriented, organized |
+| **Michael** | Quiet, encyclopedic knowledge |
+| **Alex** | Strategic thinker, big picture |
+| **Sam** | Thorough, delighted by finding bugs |
+
+> Works with any Claude Code setup — no additional plugins required.
+
+### C-Team (Chris's Direct Reports)
+
+These handle the main agent's tool calls — every Read, Grep, Edit, Bash shows up as one of them working:
+
+| Character | Specialty |
+|-----------|-----------|
+| **Mia** | Data analysis — gets excited about insights |
+| **Kai** | Code craftsman — obsessed with clean code |
+| **Zoe** | UX advocate — thinks from user perspective |
+| **Liam** | Infrastructure — loves system stability |
+| **Aria** | Documentation — makes complex things clear |
+| **Noah** | Testing — finds edge cases others miss |
+| **Luna** | Security — always thinking about threats |
+| **Owen** | Performance — optimizes everything |
+
+Characters are automatically assigned based on agent type. When more agents are needed than main characters available, C-Team members step in.
+
+---
+
+## Configuration
+
+Run `/backstage:config` in Claude Code to configure:
+
+| Setting | Options | Default | Description |
+|---------|---------|---------|-------------|
+| **Language** | `en`, `ko` | `en` | UI text, idle chats, tool descriptions |
+| **AI Dialogue** | `true` / `false` | `true` | AI-generated character banter on task completion |
+
+Config is stored at `~/.claude/plugins/backstage/config.json`.
+
+### Adding a new language
+
+Create `viewer/i18n/{lang}.json` and `hooks/i18n/{lang}.json` following the existing `en.json` structure, then set `language` in config.
+
+---
+
+## Architecture
 
 ```
 claude-backstage/
 ├── .claude-plugin/
-│   └── plugin.json           # 플러그인 메타데이터
+│   ├── plugin.json              # Plugin metadata & version
+│   └── marketplace.json         # Marketplace listing
 ├── agents/
-│   └── dialogue-generator.md # AI 대화 생성 에이전트
+│   └── dialogue-generator.md    # AI dialogue generation prompt
 ├── hooks/
-│   ├── hooks.json            # Hook 설정 (참조용)
-│   ├── characters.json       # 캐릭터 정보
-│   ├── pre-tool-hook.sh      # PreToolUse hook
-│   ├── post-tool-hook.sh     # PostToolUse hook
-│   ├── user-prompt-hook.sh   # UserPromptSubmit hook
-│   └── stop-hook.sh          # Stop hook
+│   ├── hooks.json               # Hook configuration
+│   ├── characters.json          # Character definitions & state
+│   ├── pre-tool-hook.sh         # PreToolUse — records agent work
+│   ├── post-tool-hook.sh        # PostToolUse — completions + dialogue
+│   ├── user-prompt-hook.sh      # UserPromptSubmit — user requests
+│   ├── stop-hook.sh             # Stop — session end cleanup
+│   └── i18n/                    # Hook-side translations
+├── skills/
+│   ├── server/SKILL.md          # /backstage:server command
+│   └── config/SKILL.md          # /backstage:config command
 ├── viewer/
-│   ├── server.ts             # Bun SSE 서버
-│   └── index.html            # 웹 UI
-├── install.sh                # 자동 설치
-└── uninstall.sh              # 완전 제거
+│   ├── server.ts                # Bun SSE server (port 7777)
+│   ├── index.html               # Entry point
+│   ├── i18n/                    # Client-side translations
+│   ├── js/
+│   │   ├── main.js              # App bootstrap, SSE, event routing
+│   │   ├── engine.js            # Game loop, physics, input
+│   │   ├── renderer.js          # Canvas rendering, HUD, furniture
+│   │   ├── character.js         # A* pathfinding, collision, movement
+│   │   ├── map.js               # Office layout (21×15 tile grid)
+│   │   ├── bubble.js            # Speech bubbles
+│   │   └── sprite-generator.js  # Procedural sprite generation
+│   ├── css/game.css             # Styling + CRT scanline effect
+│   └── sprites/                 # Character sprite sheets (.png)
+├── install.sh                   # Automated installation
+├── uninstall.sh                 # Complete removal
+└── ARCHITECTURE.md              # Detailed technical documentation
 ```
 
-## 라이선스
+### Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Server | [Bun](https://bun.sh) + TypeScript |
+| Rendering | HTML5 Canvas (no framework) |
+| Pathfinding | A* algorithm |
+| Communication | Server-Sent Events (SSE) |
+| Hooks | Bash + jq |
+| AI Dialogue | `claude --print` with Haiku |
+| Sprites | Aseprite → PNG sprite sheets |
+
+---
+
+## License
 
 MIT

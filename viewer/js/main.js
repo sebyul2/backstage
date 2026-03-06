@@ -9,6 +9,10 @@ import { ParticleManager } from './particles.js?v=2.7';
 import { MAP_W, MAP_H, TILE_SIZE, MAP_COLS, MAP_ROWS, deskPositions, playerSpawn, isPixelWalkable, groundMap, furniture } from './map.js?v=2.7';
 import { PhysicsWorld } from './physics.js?v=2.7';
 
+// ─── i18n ────────────────────────────────────────────────────────
+window.i18n = {};
+fetch('/i18n').then(r => r.json()).then(data => { window.i18n = data; }).catch(() => {});
+
 // ─── Globals ─────────────────────────────────────────────────────
 let engine, characters, bubbles, renderer, particles, physics;
 let player = null;
@@ -127,11 +131,7 @@ function updatePlayer(dt) {
 
 // ─── 채찍질 (Whip) ──────────────────────────────────────────────
 
-const WHIP_REACTIONS = [
-  '앗! 네 바로요!', '헉 알겠습니다!', 'ㅋㅋ 가요 가요',
-  '어 벌써요?', '넵넵!', '아이고...', '잠깐만요ㅠ',
-  '네?! 아 네!', '으악 놀랐잖아요', '가고 있었어요...',
-];
+// WHIP_REACTIONS: loaded from i18n (window.i18n.whip_reactions)
 
 function handleWhip() {
   if (!spaceJustPressed) return;
@@ -171,7 +171,8 @@ function handleWhip() {
       particles.spawnWhip(player.x + hx, player.y + hy, nearest.x, nearest.y);
       particles.spawn(nearest.x, nearest.y - 20, '💥');
     }
-    const reaction = WHIP_REACTIONS[Math.floor(Math.random() * WHIP_REACTIONS.length)];
+    const reactions = window.i18n?.whip_reactions || ['Ah! Right away!'];
+    const reaction = reactions[Math.floor(Math.random() * reactions.length)];
     bubbles.add(nearest.name, reaction, 'talk', 2000);
 
     // Physics knockback: strong push toward wall
@@ -536,12 +537,15 @@ function handleUsageUpdate(entry) {
 
 function parseToolFromMsg(msg) {
   if (!msg) return 'Read';
-  if (msg.includes('📖') || msg.includes('확인')) return 'Read';
-  if (msg.includes('🔍') || msg.includes('찾')) return 'Glob';
-  if (msg.includes('🔎') || msg.includes('검색')) return 'Grep';
-  if (msg.includes('✏️') || msg.includes('수정')) return 'Edit';
-  if (msg.includes('📝') || msg.includes('작성')) return 'Write';
-  if (msg.includes('💻') || msg.includes('실행')) return 'Bash';
+  const hints = window.i18n?.tool_verb_parse_hints || {
+    Read: ['📖', 'check'], Glob: ['🔍', 'find'], Grep: ['🔎', 'search'],
+    Edit: ['✏️', 'edit'], Write: ['📝', 'writ'], Bash: ['💻', 'run'],
+  };
+  for (const [tool, keywords] of Object.entries(hints)) {
+    for (const kw of keywords) {
+      if (msg.includes(kw)) return tool;
+    }
+  }
   return 'Read';
 }
 
@@ -807,7 +811,7 @@ function init() {
     }
     const char = characters.get(name);
     if (char && speed > 5) {
-      const msgs = ['으악!', '쿵!', '아야...', '헉!', 'ㅠㅠ'];
+      const msgs = window.i18n?.wall_collisions || ['Ouch!'];
       bubbles.add(name, msgs[Math.floor(Math.random() * msgs.length)], 'talk', 1500);
     }
   });
@@ -1034,7 +1038,7 @@ async function showPlanListPopup(clientX, clientY) {
     flex: '1', overflowY: 'auto', padding: '16px',
     fontSize: '11px', color: '#C2C3C7', lineHeight: '1.6', wordBreak: 'break-word',
   });
-  detailPane.textContent = '← plan을 선택하세요';
+  detailPane.textContent = window.i18n?.ui?.plan_select || '← Select a plan';
 
   body.appendChild(listPane);
   body.appendChild(detailPane);
@@ -1053,11 +1057,11 @@ async function showPlanListPopup(clientX, clientY) {
   let selectedItem = null;
   try {
     const res = await fetch('/plans');
-    if (!res.ok) { listPane.innerHTML = '<div style="padding:12px;color:#9CA3AF">(로드 실패)</div>'; return; }
+    if (!res.ok) { listPane.innerHTML = '<div style="padding:12px;color:#9CA3AF">' + (window.i18n?.ui?.load_fail || '(Load failed)') + '</div>'; return; }
     const data = await res.json();
     const files = data.files || [];
     if (files.length === 0) {
-      listPane.innerHTML = '<div style="padding:12px;color:#9CA3AF">(plan 없음)</div>';
+      listPane.innerHTML = '<div style="padding:12px;color:#9CA3AF">' + (window.i18n?.ui?.no_plan || '(No plan)') + '</div>';
       return;
     }
 
@@ -1065,16 +1069,16 @@ async function showPlanListPopup(clientX, clientY) {
       if (selectedItem) selectedItem.style.background = 'transparent';
       selectedItem = itemEl;
       itemEl.style.background = '#29ADFF22';
-      detailPane.textContent = '로딩 중...';
+      detailPane.textContent = window.i18n?.ui?.loading || 'Loading...';
       try {
         const r = await fetch('/plan/' + encodeURIComponent(file.name));
         if (r.ok) {
           const d = await r.json();
-          renderMarkdownContent(detailPane, d.content || '(내용 없음)');
+          renderMarkdownContent(detailPane, d.content || (window.i18n?.ui?.no_content || '(No content)'));
         } else {
-          detailPane.textContent = '(로드 실패)';
+          detailPane.textContent = window.i18n?.ui?.load_fail || '(Load failed)';
         }
-      } catch { detailPane.textContent = '(로드 실패)'; }
+      } catch { detailPane.textContent = window.i18n?.ui?.load_fail || '(Load failed)'; }
     }
 
     for (const file of files) {
@@ -1103,7 +1107,7 @@ async function showPlanListPopup(clientX, clientY) {
       }
     }
   } catch {
-    listPane.innerHTML = '<div style="padding:12px;color:#9CA3AF">(로드 실패)</div>';
+    listPane.innerHTML = '<div style="padding:12px;color:#9CA3AF">' + (window.i18n?.ui?.load_fail || '(Load failed)') + '</div>';
   }
 }
 
@@ -1182,7 +1186,7 @@ async function showTaskPopup(task, clientX, clientY) {
 
   // 설명
   const desc = document.createElement('div');
-  desc.textContent = task.description || '(설명 없음)';
+  desc.textContent = task.description || (window.i18n?.ui?.no_desc || '(No description)');
   Object.assign(desc.style, {
     fontSize: '12px', color: '#C2C3C7', lineHeight: '1.6',
     whiteSpace: 'pre-wrap', wordBreak: 'break-word',
@@ -1230,7 +1234,7 @@ async function showTaskPopup(task, clientX, clientY) {
   });
 
   const planContent = document.createElement('div');
-  planContent.textContent = '로딩 중...';
+  planContent.textContent = window.i18n?.ui?.loading || 'Loading...';
   Object.assign(planContent.style, {
     fontSize: '11px', color: '#8B93A1', lineHeight: '1.6',
     wordBreak: 'break-word',
@@ -1250,17 +1254,17 @@ async function showTaskPopup(task, clientX, clientY) {
         try {
           // 1) plan 목록에서 현재 활성 plan 또는 최신 plan 찾기
           const listRes = await fetch('/plans');
-          if (!listRes.ok) { planContent.textContent = '(plan 로드 실패)'; return; }
+          if (!listRes.ok) { planContent.textContent = window.i18n?.ui?.plan_load_fail || '(Plan load failed)'; return; }
           const listData = await listRes.json();
           const planFiles = listData.files || [];
           const targetName = listData.currentPlan || (planFiles[0] && planFiles[0].name);
-          if (!targetName) { planContent.textContent = '(활성 plan 없음)'; return; }
+          if (!targetName) { planContent.textContent = window.i18n?.ui?.active_plan_none || '(No active plan)'; return; }
 
           // 2) 상세 로드
           const res = await fetch('/plan/' + encodeURIComponent(targetName));
-          if (!res.ok) { planContent.textContent = '(plan 로드 실패)'; return; }
+          if (!res.ok) { planContent.textContent = window.i18n?.ui?.plan_load_fail || '(Plan load failed)'; return; }
           const data = await res.json();
-          if (!data.content) { planContent.textContent = '(plan 없음)'; return; }
+          if (!data.content) { planContent.textContent = window.i18n?.ui?.no_plan || '(No plan)'; return; }
 
           // 3) task subject와 관련 section 추출
           const taskSubject = (task.subject || '').toLowerCase();
@@ -1283,10 +1287,10 @@ async function showTaskPopup(task, clientX, clientY) {
             if (inSection) relevant.push(line);
           }
           if (relevant.length === 0) relevant = lines.slice(0, 40);
-          const mdText = relevant.join('\n').trim() || '(plan 없음)';
+          const mdText = relevant.join('\n').trim() || (window.i18n?.ui?.no_plan || '(No plan)');
           renderMarkdownContent(planContent, mdText);
         } catch {
-          planContent.textContent = '(plan 로드 실패)';
+          planContent.textContent = window.i18n?.ui?.plan_load_fail || '(Plan load failed)';
         }
       }
     } else {
@@ -1357,7 +1361,7 @@ async function showChrisLogPopup() {
     fontSize: '16px', fontWeight: 'bold', color: '#FF77A8',
     marginBottom: '16px', paddingRight: '30px',
   });
-  header.textContent = '🧠 Chris 작업 노트';
+  header.textContent = window.i18n?.ui?.chris_log_header || '🧠 Chris Work Notes';
 
   // X 버튼
   const closeBtn = document.createElement('div');
@@ -1395,7 +1399,7 @@ async function showChrisLogPopup() {
         currentGroup = null;
         continue;
       }
-      const key = ch.userMsg || ch.title || '(무제)';
+      const key = ch.userMsg || ch.title || (window.i18n?.ui?.untitled || '(Untitled)');
       if (!currentGroup || currentGroup.userMsg !== key) {
         currentGroup = { userMsg: key, ts: ch.ts, chapters: [ch] };
         groups.push(currentGroup);
@@ -1408,7 +1412,7 @@ async function showChrisLogPopup() {
 
   if (groups.length === 0) {
     const empty = document.createElement('div');
-    empty.textContent = '아직 기록된 내용이 없습니다.';
+    empty.textContent = window.i18n?.ui?.chris_log_empty || 'No entries recorded yet.';
     Object.assign(empty.style, { color: '#5F574F', fontSize: '12px' });
     contentContainer.appendChild(empty);
   } else {
@@ -1463,7 +1467,7 @@ async function showChrisLogPopup() {
       });
 
       const groupMeta = document.createElement('span');
-      groupMeta.textContent = (grp.ts || '') + (grp.chapters.length > 1 ? '  ' + grp.chapters.length + '건' : '');
+      groupMeta.textContent = (grp.ts || '') + (grp.chapters.length > 1 ? '  ' + grp.chapters.length + (window.i18n?.ui?.count_suffix || '') : '');
       Object.assign(groupMeta.style, {
         color: '#5F574F', fontSize: '10px', marginLeft: '12px', flexShrink: '0',
       });
@@ -1651,7 +1655,7 @@ async function showChrisLogPopup() {
         if (hiddenEls.length > 0) {
           const moreBtn = document.createElement('div');
           let expanded = false;
-          moreBtn.textContent = `▼ +${hiddenEls.length}개 더보기`;
+          moreBtn.textContent = (window.i18n?.ui?.more_button || '▼ +${n} more').replace('${n}', hiddenEls.length);
           Object.assign(moreBtn.style, {
             color: '#29ADFF', fontSize: '10px', cursor: 'pointer',
             marginTop: '6px', opacity: '0.8', userSelect: 'none',
@@ -1660,7 +1664,7 @@ async function showChrisLogPopup() {
             e.stopPropagation();
             expanded = !expanded;
             for (const el of hiddenEls) el.style.display = expanded ? '' : 'none';
-            moreBtn.textContent = expanded ? '▲ 접기' : `▼ +${hiddenEls.length}개 더보기`;
+            moreBtn.textContent = expanded ? (window.i18n?.ui?.collapse_button || '▲ Collapse') : (window.i18n?.ui?.more_button || '▼ +${n} more').replace('${n}', hiddenEls.length);
           });
           chapterEl.appendChild(moreBtn);
         }
@@ -1777,7 +1781,7 @@ async function showAgentInfoPopup(name, clientX, clientY) {
   closeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); overlay.remove(); });
 
   const header = document.createElement('div');
-  header.textContent = name + ' — 로딩 중...';
+  header.textContent = name + (window.i18n?.ui?.agent_loading || ' — Loading...');
   Object.assign(header.style, {
     fontSize: '14px', fontWeight: 'bold', color: '#29ADFF',
     marginBottom: '12px', paddingRight: '28px',
@@ -1810,7 +1814,7 @@ async function showAgentInfoPopup(name, clientX, clientY) {
 
         const elapsed = Math.floor((Date.now() - data.lastActivity) / 1000);
         const timeInfo = document.createElement('div');
-        timeInfo.textContent = '최근 활동: ' + elapsed + '초 전';
+        timeInfo.textContent = (window.i18n?.ui?.recent_activity || 'Recent: ${n}s ago').replace('${n}', elapsed);
         Object.assign(timeInfo.style, { fontSize: '10px', color: '#8B93A1', marginBottom: '12px' });
         body.appendChild(timeInfo);
 
@@ -1818,7 +1822,7 @@ async function showAgentInfoPopup(name, clientX, clientY) {
         if (data.recentEvents) data.recentEvents = data.recentEvents.filter(e => e.type !== 'idle-chat');
         if (data.recentEvents && data.recentEvents.length > 0) {
           const evTitle = document.createElement('div');
-          evTitle.textContent = '최근 활동:';
+          evTitle.textContent = window.i18n?.ui?.recent_activity_label || 'Recent activity:';
           Object.assign(evTitle.style, {
             fontSize: '11px', color: '#FF77A8', marginBottom: '6px', fontWeight: 'bold',
           });
@@ -1848,7 +1852,7 @@ async function showAgentInfoPopup(name, clientX, clientY) {
           }
         } else {
           const noEvt = document.createElement('div');
-          noEvt.textContent = '(최근 활동 없음)';
+          noEvt.textContent = window.i18n?.ui?.no_recent || '(No recent activity)';
           Object.assign(noEvt.style, { color: '#4A5568', fontSize: '11px' });
           body.appendChild(noEvt);
         }
@@ -1856,14 +1860,14 @@ async function showAgentInfoPopup(name, clientX, clientY) {
         header.textContent = name;
         header.style.color = '#8B93A1';
         const idleMsg = document.createElement('div');
-        idleMsg.textContent = '현재 작업 중이 아닙니다.';
+        idleMsg.textContent = window.i18n?.ui?.not_working || 'Not currently working.';
         Object.assign(idleMsg.style, { color: '#4A5568', fontSize: '11px' });
         body.appendChild(idleMsg);
       }
     }
   } catch {
     const errMsg = document.createElement('div');
-    errMsg.textContent = '(정보 로드 실패)';
+    errMsg.textContent = window.i18n?.ui?.info_fail || '(Info load failed)';
     Object.assign(errMsg.style, { color: '#C0392B', fontSize: '11px' });
     body.appendChild(errMsg);
   }
@@ -1878,8 +1882,8 @@ function showSessionEndOverlay() {
   overlay.innerHTML = `
     <div class="session-end-box">
       <div class="session-end-icon">⚡</div>
-      <div class="session-end-title">세션이 종료되었습니다</div>
-      <div class="session-end-desc">서버와의 연결이 끊어졌습니다</div>
+      <div class="session-end-title">${window.i18n?.ui?.session_ended || 'Session Ended'}</div>
+      <div class="session-end-desc">${window.i18n?.ui?.connection_lost || 'Server connection lost'}</div>
     </div>`;
   document.getElementById('game-container').appendChild(overlay);
 }

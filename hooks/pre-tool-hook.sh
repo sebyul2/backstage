@@ -4,9 +4,17 @@
 # Backstage 비활성 상태면 즉시 종료 (토큰 절약)
 [ ! -f "$HOME/.claude/plugins/backstage/enabled" ] && exit 0
 
-ACTIVE_AGENT_FILE="$HOME/.claude/plugins/backstage/active-agent.json"
-HISTORY_FILE="$HOME/.claude/plugins/backstage/history.jsonl"
-LAST_TOOL_FILE="$HOME/.claude/plugins/backstage/last-chris-tool.txt"
+PLUGIN_DIR="$HOME/.claude/plugins/backstage"
+ACTIVE_AGENT_FILE="$PLUGIN_DIR/active-agent.json"
+HISTORY_FILE="$PLUGIN_DIR/history.jsonl"
+LAST_TOOL_FILE="$PLUGIN_DIR/last-chris-tool.txt"
+
+# i18n loading
+_LANG=$(cat "$PLUGIN_DIR/config.json" 2>/dev/null | jq -r '.language // "en"')
+_I18N="$PLUGIN_DIR/hooks-i18n/${_LANG}.json"
+[ ! -f "$_I18N" ] && _I18N="$PLUGIN_DIR/hooks-i18n/en.json"
+_tv() { jq -r ".tool_verbs.${1}.verb // \"working\"" "$_I18N" 2>/dev/null; }
+_te() { jq -r ".tool_verbs.${1}.emoji // \"🔧\"" "$_I18N" 2>/dev/null; }
 
 # 활성 세션의 cwd 기록 (서버가 올바른 transcript를 선택하도록)
 echo "$(pwd)" > "$HOME/.claude/plugins/backstage/active-session-cwd.txt" 2>/dev/null
@@ -25,13 +33,13 @@ case "$tool_name" in
         case "$tool_name" in
             Edit)
                 target=$(echo "$input" | jq -r '.tool_input.file_path // ""' | xargs basename 2>/dev/null)
-                emoji="✏️"; verb="수정 중" ;;
+                emoji=$(_te Edit); verb=$(_tv Edit) ;;
             Write)
                 target=$(echo "$input" | jq -r '.tool_input.file_path // ""' | xargs basename 2>/dev/null)
-                emoji="📝"; verb="작성 중" ;;
+                emoji=$(_te Write); verb=$(_tv Write) ;;
             Bash)
                 target=$(echo "$input" | jq -r '.tool_input.command // ""' | head -c 30)
-                emoji="💻"; verb="실행 중" ;;
+                emoji=$(_te Bash); verb=$(_tv Bash) ;;
         esac
 
         ts=$(date '+%H:%M:%S')
@@ -54,13 +62,13 @@ case "$tool_name" in
             case "$tool_name" in
                 Read)
                     target=$(echo "$input" | jq -r '.tool_input.file_path // ""' | xargs basename 2>/dev/null)
-                    emoji="📖"; verb="확인 중" ;;
+                    emoji=$(_te Read); verb=$(_tv Read) ;;
                 Glob)
                     target=$(echo "$input" | jq -r '.tool_input.pattern // ""')
-                    emoji="🔍"; verb="찾는 중" ;;
+                    emoji=$(_te Glob); verb=$(_tv Glob) ;;
                 Grep)
                     target=$(echo "$input" | jq -r '.tool_input.pattern // ""' | head -c 20)
-                    emoji="🔎"; verb="검색 중" ;;
+                    emoji=$(_te Grep); verb=$(_tv Grep) ;;
             esac
 
             ts=$(date '+%H:%M:%S')

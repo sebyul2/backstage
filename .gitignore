@@ -31,6 +31,15 @@ data/*
 # Temp files
 temp-*.md
 
+# Vigloo (workspace plugin, not part of backstage)
+.vigloo/
+
 # Viewer runtime
 viewer/.omc/
+viewer/.vigloo/
 viewer/node_modules/
+
+# Playwright (dev-only)
+package.json
+package-lock.json
+node_modules/

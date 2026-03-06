@@ -19,7 +19,7 @@ html, body {
 /* ─── App Layout: centered game + chat ──────────────────────── */
 
 #app {
-  width: 1760px;
+  width: 1280px;
   height: 720px;
   display: flex;
   align-items: center;
@@ -42,8 +42,8 @@ html, body {
 }
 
 #game {
-  /* Fixed display size — 30x15 tiles at 48px */
-  width: 1440px;
+  /* Fixed display size — 21x15 tiles at 48px */
+  width: 1008px;
   height: 720px;
 
   border-radius: 4px 0 0 4px;
@@ -58,7 +58,7 @@ html, body {
   position: absolute;
   top: 0;
   left: 0;
-  width: 1440px;
+  width: 1008px;
   height: 720px;
   pointer-events: none;
   background: repeating-linear-gradient(
@@ -75,7 +75,7 @@ html, body {
 /* ─── Chat Log (attached to game canvas) ─────────────────────── */
 
 #chat-log {
-  width: 320px;
+  width: 272px;
   height: 720px;
   background: #0c0f1a;
   border: 1px solid #1a1f35;

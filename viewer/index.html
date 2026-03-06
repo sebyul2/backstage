@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Backstage v2.8</title>
+<title>Backstage v0.2.9</title>
 <link rel="stylesheet" href="/css/game.css?v=2.8">
 <script src="/js/lib/matter.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -11,7 +11,7 @@
 function fitViewport() {
   var app = document.getElementById('app');
   if (!app) return;
-  var sx = window.innerWidth / 1760;
+  var sx = window.innerWidth / 1280;
   var sy = window.innerHeight / 720;
   var s = Math.min(sx, sy);
   app.style.transform = 'translate(-50%,-50%) scale(' + s + ')';
@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', fitViewport);
 
 <!-- Loading screen -->
 <div id="loading">
-  <div class="title">BACKSTAGE v2.8</div>
+  <div class="title">BACKSTAGE v0.2.9</div>
   <div class="dots">Loading</div>
 </div>
 

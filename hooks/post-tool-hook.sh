@@ -11,6 +11,11 @@ DEBUG_LOG="$PLUGIN_DIR/debug-hook.log"
 DIALOGUE_QUEUE_FILE="$PLUGIN_DIR/dialogue-queue.jsonl"
 C_TEAM_POOL_FILE="$PLUGIN_DIR/c-team-pool.json"
 
+# i18n loading
+_LANG=$(cat "$PLUGIN_DIR/config.json" 2>/dev/null | jq -r '.language // "en"')
+_I18N="$PLUGIN_DIR/hooks-i18n/${_LANG}.json"
+[ ! -f "$_I18N" ] && _I18N="$PLUGIN_DIR/hooks-i18n/en.json"
+
 # ── C-team 동적 풀 할당 함수 ──────────────────────────────────────
 get_cteam_char() {
     local tool="$1"
@@ -237,14 +242,17 @@ if [ "$tool_name" = "Task" ]; then
             *) agent_name="Agent" ;;
         esac
 
-        description=$(echo "$input" | jq -r '.tool_input.description // "작업"')
+        _task_default=$(jq -r '.task_labels.task_default // "task"' "$_I18N" 2>/dev/null)
+        description=$(echo "$input" | jq -r ".tool_input.description // \"$_task_default\"")
         # 실제 결과 요약 추출 (첫 300자)
         result_text=$(echo "$input" | jq -r '.tool_response.content[0].text // ""' | head -c 300)
 
         # 큐에 대화 생성 요청 기록 (server.ts가 소비)
         mkdir -p "$(dirname "$DIALOGUE_QUEUE_FILE")"
-        jq -nc --arg ep "$(date +%s)" --arg speaker "$agent_name" --arg role "$agent_type" --arg task "$description" --arg dtype "complete" \
-            '{epoch:($ep|tonumber),speaker:$speaker,role:$role,type:$dtype,prompt:("IT스타트업 " + $speaker + "(" + $role + ")가 작업 완료: " + $task + ". 완료 보고 한마디. 15-25자 한국어. JSON만: {\"lines\":[{\"speaker\":\"" + $speaker + "\",\"msg\":\"대사\"}]}")}' >> "$DIALOGUE_QUEUE_FILE"
+        _tpl=$(jq -r '.dialogue_prompt.complete_template // "IT startup ${speaker}(${role}) completed: ${task}. One-liner. 15-25 chars. JSON only: {\"lines\":[{\"speaker\":\"${speaker}\",\"msg\":\"line\"}]}"' "$_I18N" 2>/dev/null)
+        _prompt=$(echo "$_tpl" | sed "s/\${speaker}/$agent_name/g; s/\${role}/$agent_type/g; s/\${task}/$description/g")
+        jq -nc --arg ep "$(date +%s)" --arg speaker "$agent_name" --arg role "$agent_type" --arg task "$description" --arg dtype "complete" --arg prompt "$_prompt" \
+            '{epoch:($ep|tonumber),speaker:$speaker,role:$role,type:$dtype,prompt:$prompt}' >> "$DIALOGUE_QUEUE_FILE"
         exit 0
     fi
 fi
@@ -297,7 +305,7 @@ case "$tool_name" in
                 [ -n "$cmd" ] && {
                     output=$(echo "$input" | jq -r '.tool_response.content[0].text // ""' | head -c 500)
                     summary=$(echo "$output" | grep -v '^$' | tail -1 | head -c 80)
-                    [ -z "$summary" ] && summary="완료"
+                    [ -z "$summary" ] && summary=$(jq -r '.python_labels.bash_complete // "done"' "$_I18N" 2>/dev/null)
                     jq -nc --arg ts "$ts" --arg ep "$ep" --arg sp "$c_char" --arg role "$c_role" --arg cmd "$cmd" --arg summary "$summary" --arg detail "$output" \
                         '{ts:$ts,epoch:($ep|tonumber),type:"work-done",speaker:$sp,role:$role,msg:("💻\n" + $cmd),detail:$detail}' >> "$HISTORY_FILE"
                 }
@@ -322,27 +330,27 @@ case "$tool_name" in
         if [ $((counter % 3)) -eq 0 ]; then
             c_name=$(get_cteam_char "$tool_name")
             c_role="c-$(echo "$tool_name" | tr 'A-Z' 'a-z')"
-            # 캐릭터별 성격 (동적 할당이지만 캐릭터 성격은 고유)
-            case "$c_name" in
-                Mia) c_desc="밝고 호기심 많음. 데이터 보면 흥분. ㅋㅋ 잘 씀" ;;
-                Kai) c_desc="코드 장인. 깔끔함 집착. 변경에 예민" ;;
-                Zoe) c_desc="검색 달인. 패턴 발견하면 흥분. 분석적" ;;
-                Liam) c_desc="파일 정리광. 구조 파악 전문. 체계적" ;;
-                Aria) c_desc="창작 좋아함. 새 파일에 설렘. 덮어쓰기엔 긴장" ;;
-                Noah) c_desc="실행 담당. 빌드/테스트에 진심. 결과에 일희일비" ;;
-                Luna) c_desc="꼼꼼한 관찰자. 디테일에 강함. 조용하지만 날카로움" ;;
-                Owen) c_desc="에너지 넘침. 새로운 거 좋아함. 낙관적" ;;
-                *) c_desc="IT 스타트업 팀원. 밝고 유쾌함" ;;
-            esac
+            # 캐릭터별 성격 (i18n에서 로드)
+            c_desc=$(jq -r --arg n "$c_name" '.c_team[$n] // .c_team._default // "IT startup team member"' "$_I18N" 2>/dev/null)
 
             # Python으로 실제 데이터 추출 → dialogue-generator AI에 전달할 요약
-            data_summary=$(echo "$input" | python3 -c '
+            # Load python labels from i18n
+            data_summary=$(echo "$input" | _PY_LABELS="$(cat "$_I18N" 2>/dev/null)" python3 -c '
 import json, sys, os, re
 
 try:
     data = json.load(sys.stdin)
 except:
     sys.exit(1)
+
+# Load i18n labels
+i18n_raw = os.environ.get("_PY_LABELS", "{}")
+try:
+    i18n = json.loads(i18n_raw).get("python_labels", {})
+except:
+    i18n = {}
+
+L = lambda k, d="": i18n.get(k, d)
 
 tool = data.get("tool_name", "")
 ti = data.get("tool_input", {})
@@ -370,12 +378,12 @@ if tool == "Read":
     imports = sum(1 for l in lines if "import " in l[:40] or "require(" in l)
     funcs = sum(1 for l in lines if re.match(r".*\b(function |class |def |export (function|class|const) )", l))
     comments = sum(1 for l in lines if l.strip().startswith(("//", "#", "/*", "*")))
-    info.append(f"파일: {fn}")
-    info.append(f"{lc}줄")
-    if imports: info.append(f"import {imports}개")
-    if funcs: info.append(f"함수/클래스 {funcs}개")
-    if comments == 0 and lc > 50: info.append("주석 없음")
-    if ext: info.append(f"타입: {ext}")
+    info.append(f"{L('file','File')}: {fn}")
+    info.append(f"{lc}{L('lines','lines')}")
+    if imports: info.append(f"{L('imports','imports')} {imports}{L('imports_suffix','')}")
+    if funcs: info.append(f"{L('funcs','funcs/classes')} {funcs}{L('funcs_suffix','')}")
+    if comments == 0 and lc > 50: info.append(L("no_comments","no comments"))
+    if ext: info.append(f"{L('type','type')}: {ext}")
 
 elif tool == "Edit":
     fp = ti.get("file_path", "")
@@ -384,15 +392,15 @@ elif tool == "Edit":
     new = ti.get("new_string", "")
     ol = old.count("\n") + (1 if old.strip() else 0)
     nl = new.count("\n") + (1 if new.strip() else 0)
-    info.append(f"파일: {fn}")
-    info.append(f"-{ol}줄 +{nl}줄")
+    info.append(f"{L('file','File')}: {fn}")
+    info.append(f"-{ol}{L('minus_lines','lines')} +{nl}{L('plus_lines','lines')}")
     d = abs(len(new) - len(old))
-    if d < 5: info.append("미세 조정")
-    elif d > 500: info.append("대규모 수정")
+    if d < 5: info.append(L("fine_tuning","fine tuning"))
+    elif d > 500: info.append(L("large_edit","large edit"))
     for l in new.split("\n"):
         m = re.match(r"\s*(?:function |export (?:function|const|class) |def )(\w+)", l)
         if m:
-            info.append(f"함수: {m.group(1)}")
+            info.append(f"{L('function','func')}: {m.group(1)}")
             break
 
 elif tool == "Grep":
@@ -402,16 +410,16 @@ elif tool == "Grep":
     files = set()
     for l in lines:
         if ":" in l: files.add(l.split(":")[0])
-    info.append(f"패턴: {pat}")
-    info.append(f"{mc}곳 매칭")
-    if files: info.append(f"{len(files)}개 파일")
+    info.append(f"{L('pattern','pattern')}: {pat}")
+    info.append(f"{mc}{L('matches','matches')}")
+    if files: info.append(f"{len(files)}{L('files_suffix','files')}")
 
 elif tool == "Glob":
     pat = ti.get("pattern", "")[:30]
     lines = [l for l in resp.split("\n") if l.strip()] if resp else []
     fc = len(lines)
-    info.append(f"패턴: {pat}")
-    info.append(f"{fc}개 파일")
+    info.append(f"{L('pattern','pattern')}: {pat}")
+    info.append(f"{fc}{L('files_suffix','files')}")
 
 elif tool == "Write":
     fp = ti.get("file_path", "")
@@ -419,18 +427,18 @@ elif tool == "Write":
     content = ti.get("content", "")
     lc = content.count("\n") + (1 if content.strip() else 0)
     ext = os.path.splitext(fn)[1]
-    info.append(f"파일: {fn}")
-    info.append(f"{lc}줄")
-    if ext: info.append(f"타입: {ext}")
+    info.append(f"{L('file','File')}: {fn}")
+    info.append(f"{lc}{L('lines','lines')}")
+    if ext: info.append(f"{L('type','type')}: {ext}")
 
 elif tool == "Bash":
     cmd = ti.get("command", "")[:60]
     last_lines = resp.split("\n")[-5:] if resp else []
-    info.append(f"명령: {cmd}")
-    if "error" in resp[:500].lower(): info.append("에러 발생")
-    elif "success" in resp[:500].lower(): info.append("성공")
-    elif any("pass" in l.lower() for l in last_lines): info.append("테스트 통과")
-    elif any("fail" in l.lower() for l in last_lines): info.append("실패")
+    info.append(f"{L('command','cmd')}: {cmd}")
+    if "error" in resp[:500].lower(): info.append(L("error_occurred","error occurred"))
+    elif "success" in resp[:500].lower(): info.append(L("success","success"))
+    elif any("pass" in l.lower() for l in last_lines): info.append(L("test_passed","tests passed"))
+    elif any("fail" in l.lower() for l in last_lines): info.append(L("failed","failed"))
 
 print(", ".join(info) if info else "")
 ' 2>/dev/null)
@@ -438,8 +446,10 @@ print(", ".join(info) if info else "")
             if [ -n "$data_summary" ]; then
                 # 큐에 C-team 대화 생성 요청 기록 (server.ts가 소비)
                 mkdir -p "$(dirname "$DIALOGUE_QUEUE_FILE")"
-                jq -nc --arg ep "$(date +%s)" --arg speaker "$c_name" --arg role "$c_role" --arg data "$data_summary" --arg desc "$c_desc" --arg dtype "c-bubble" \
-                    '{epoch:($ep|tonumber),speaker:$speaker,role:$role,type:$dtype,prompt:("IT스타트업 " + $speaker + "(" + $desc + ")가 이 상황을 보고 한마디: " + $data + ". 15-30자 한국어. JSON만: {\"lines\":[{\"speaker\":\"" + $speaker + "\",\"msg\":\"대사\"}]}")}' >> "$DIALOGUE_QUEUE_FILE"
+                _ctpl=$(jq -r '.dialogue_prompt.c_bubble_template // "IT startup ${speaker}(${desc}) reacts: ${data}. 15-30 chars. JSON only: {\"lines\":[{\"speaker\":\"${speaker}\",\"msg\":\"line\"}]}"' "$_I18N" 2>/dev/null)
+                _cprompt=$(echo "$_ctpl" | sed "s/\${speaker}/$c_name/g; s/\${desc}/$c_desc/g; s|\${data}|$data_summary|g")
+                jq -nc --arg ep "$(date +%s)" --arg speaker "$c_name" --arg role "$c_role" --arg data "$data_summary" --arg desc "$c_desc" --arg dtype "c-bubble" --arg prompt "$_cprompt" \
+                    '{epoch:($ep|tonumber),speaker:$speaker,role:$role,type:$dtype,prompt:$prompt}' >> "$DIALOGUE_QUEUE_FILE"
             fi
         fi
         ;;

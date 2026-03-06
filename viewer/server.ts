@@ -2,6 +2,19 @@ import { homedir } from "os";
 import * as path from "path";
 import * as fs from "fs";
 
+// ─── Config & i18n ──────────────────────────────────────────────
+const CONFIG_PATH = path.join(process.env.HOME || '', '.claude/plugins/backstage/config.json');
+let config: { language: string; ai_dialogue: boolean } = { language: 'en', ai_dialogue: true };
+try { config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
+
+const I18N_PATH = path.join(import.meta.dir, `i18n/${config.language}.json`);
+let i18n: any;
+try { i18n = JSON.parse(fs.readFileSync(I18N_PATH, 'utf-8')); } catch {
+  i18n = JSON.parse(fs.readFileSync(path.join(import.meta.dir, 'i18n/en.json'), 'utf-8'));
+}
+
+const SERVER_START_TIME = Date.now();
+const SERVER_START_EPOCH = Math.floor(SERVER_START_TIME / 1000);
 const PLUGIN_DIR = path.join(homedir(), ".claude/plugins/backstage");
 const HISTORY_FILE =
   process.env.BACKSTAGE_HISTORY ||
@@ -93,81 +106,23 @@ const NAME_TO_ROLE: Record<string, string> = {
   'Michael': 'agent', 'Alex': 'agent', 'Sam': 'agent',
 };
 
-const AGENT_PERSONALITIES: Record<string, string> = {
-  'Jake': '신입 1년차, 열정적, 밝음',
-  'David': '10년차 시니어, 쿨하고 간결',
-  'Kevin': '성실한 2년차, 가끔 투덜',
-  'Sophie': '디자인 감각, 깔끔함 추구',
-  'Emily': '꼼꼼, 정리 잘함, 친절',
-  'Michael': '조용, 박학다식, 말수 적음',
-  'Alex': '전략적 사고, 큰 그림 좋아함',
-  'Sam': '꼼꼼, 버그 찾으면 기뻐함, 장난기',
-};
+const AGENT_PERSONALITIES: Record<string, string> = i18n.agent_personalities || {};
 
 // ─── C-Team Personalities (for AI dialogue generation) ────────
-// Minimal tool info for fallback only
-const TOOL_INFO: Record<string, { emoji: string; verb: string }> = {
-  'Read': { emoji: '📖', verb: '확인 중' },
-  'Glob': { emoji: '🔍', verb: '찾는 중' },
-  'Grep': { emoji: '🔎', verb: '검색 중' },
-  'Edit': { emoji: '✏️', verb: '수정 중' },
-  'Write': { emoji: '📝', verb: '작성 중' },
-  'Bash': { emoji: '💻', verb: '실행 중' },
+// Tool info: emojis are fixed, verbs come from i18n
+const TOOL_EMOJIS: Record<string, string> = {
+  'Read': '📖', 'Glob': '🔍', 'Grep': '🔎',
+  'Edit': '✏️', 'Write': '📝', 'Bash': '💻',
 };
+const toolVerbs: Record<string, string> = i18n.tool_verbs || {};
+const toolVerbDefault: string = i18n.tool_verb_default || 'working';
+const TOOL_INFO: Record<string, { emoji: string; verb: string }> = {};
+for (const [tool, emoji] of Object.entries(TOOL_EMOJIS)) {
+  TOOL_INFO[tool] = { emoji, verb: toolVerbs[tool] || toolVerbDefault };
+}
 
-// ─── Idle chat lines (break room) ───────────────────────────────
-const IDLE_CHATS: string[] = [
-  '커피 한 잔 더 마셔야겠다',
-  '오늘 점심 뭐 먹지',
-  '아 오늘 금요일이었으면...',
-  '커피 맛있다 ☕',
-  '코드 리뷰 언제 하지',
-  '어제 넷플릭스 뭐 봤어?',
-  '배고프다...',
-  '자판기 커피도 괜찮네',
-  '오늘 야근인가...',
-  '주말에 뭐 해?',
-  '아 졸려 😴',
-  '이거 다 언제 끝나지',
-  '맥주 마시고 싶다 🍺',
-  '치킨 먹고 싶다',
-  '오후에 회의 있어?',
-  '카페인 충전 완료 ⚡',
-  '런치 메뉴 정했어?',
-  '아 날씨 좋다',
-  '코딩하다 머리 터질 것 같아',
-  '디버깅 지옥에서 탈출했다',
-  '깃 충돌 또 났어 ㅠ',
-  'PR 리뷰 좀 해줘~',
-  '테스트 다 통과했어! 🎉',
-  '빌드 왜 이렇게 오래 걸려',
-  '슬랙 알림 좀 꺼야겠다',
-  '점심 같이 먹을 사람?',
-  '아메리카노 하나 더',
-  '오늘 배포일이야?',
-  '버그 잡았다! 🐛',
-  '타입스크립트 왜 이래...',
-  'null이 또 터졌어',
-  '이 로직 누가 짠 거야',
-  '스프린트 끝나간다',
-  '회의실 잡았어?',
-  '와이파이 느려...',
-  '모니터 하나 더 갖고 싶다',
-  '키보드 새로 살까',
-  '에어컨 좀 세다',
-  '택배 왔대!',
-  '간식 누가 사왔어?',
-  '자판기 아이스티 맛있어',
-  '오늘 퇴근 몇 시야',
-  '스탠딩 데스크 좋네',
-  '눈이 피곤하다',
-  '스트레칭 좀 해야지',
-  '회의 끝났어?',
-  '점심 먹고 졸려...',
-  '다음 스프린트 뭐야',
-  '어제 뭐 했어?',
-  '히터 좀 틀어줘',
-];
+// ─── Idle chat lines (break room) — loaded from i18n ────────────
+const IDLE_CHATS: string[] = i18n.idle_chats || [];
 
 // ─── Utility functions ──────────────────────────────────────────
 
@@ -277,8 +232,35 @@ let usageData = {
   sevenDayPercent: null as number | null,
 };
 
-// ─── Usage API (claude-hud cache → fallback API) ──────────────
+// ─── Usage API (transcript-based + claude-hud cache fallback) ──
 let usageApiCache: { fiveHour: number | null; sevenDay: number | null; ts: number } = { fiveHour: null, sevenDay: null, ts: 0 };
+let transcriptUsageTs = 0; // last transcript-based usage scan time
+
+// Transcript-based usage scan: re-accumulate token counts from transcript
+function scanTranscriptUsage(): void {
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) return;
+  try {
+    const content = fs.readFileSync(transcriptPath, 'utf-8');
+    let inputTotal = 0, outputTotal = 0, cacheReadTotal = 0, lastContext = 0;
+    for (const line of content.trim().split('\n')) {
+      try {
+        const e = JSON.parse(line);
+        if (e.type === 'assistant' && e.message?.usage) {
+          const u = e.message.usage;
+          if (u.input_tokens) inputTotal += u.input_tokens;
+          if (u.output_tokens) outputTotal += u.output_tokens;
+          if (u.cache_read_input_tokens) cacheReadTotal += u.cache_read_input_tokens;
+          lastContext = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0);
+        }
+      } catch {}
+    }
+    usageData.inputTokens = inputTotal;
+    usageData.outputTokens = outputTotal;
+    usageData.cacheReadTokens = cacheReadTotal;
+    usageData.lastTurnContext = lastContext;
+    transcriptUsageTs = Date.now();
+  } catch {}
+}
 
 async function getUsagePercent(): Promise<{ fiveHour: number | null; sevenDay: number | null }> {
   // 자체 캐시 (60초)
@@ -286,7 +268,7 @@ async function getUsagePercent(): Promise<{ fiveHour: number | null; sevenDay: n
     return { fiveHour: usageApiCache.fiveHour, sevenDay: usageApiCache.sevenDay };
   }
 
-  // claude-hud 캐시만 읽기 (직접 API 호출 안 함 → 429 방지)
+  // claude-hud 캐시 읽기 (직접 API 호출 안 함 → 429 방지)
   const hudCache = path.join(homedir(), '.claude/plugins/claude-hud/.usage-cache.json');
   try {
     const content = JSON.parse(fs.readFileSync(hudCache, 'utf-8'));
@@ -331,6 +313,22 @@ function setupTranscriptWatcher(): void {
 const activeAgents: Map<string, { lastActivity: number; startTime: number; agentName: string; agentType: string }> = new Map();
 let lastAgentStatusEpoch = 0;
 const AGENT_IDLE_TIMEOUT = 30_000; // 30 seconds without activity → auto "done"
+
+// Server startup cleanup: remove stale agent data from previous sessions
+try { fs.unlinkSync(path.join(PLUGIN_DIR, 'active-agent.json')); } catch {}
+
+// Clean history.jsonl: remove volatile events (agent-status, work, idle-chat) but keep persistent ones
+try {
+  if (fs.existsSync(HISTORY_FILE)) {
+    const lines = fs.readFileSync(HISTORY_FILE, 'utf-8').split('\n').filter(l => l.trim());
+    const persistTypes = new Set(['done', 'task-create', 'task-update', 'request', 'assign']);
+    const cleaned = lines.filter(line => {
+      try { return persistTypes.has(JSON.parse(line).type); } catch { return false; }
+    });
+    fs.writeFileSync(HISTORY_FILE, cleaned.length > 0 ? cleaned.join('\n') + '\n' : '');
+  }
+} catch {}
+
 
 function findCurrentTranscript(): string | null {
   const projectsDir = path.join(homedir(), ".claude/projects");
@@ -651,7 +649,7 @@ function scanTranscriptForAgentWork(): void {
   if (latestPerAgent.size > 0) {
     ensureHistoryFile();
     for (const tool of latestPerAgent.values()) {
-      const info = TOOL_INFO[tool.tool] || { emoji: "🔧", verb: "작업 중" };
+      const info = TOOL_INFO[tool.tool] || { emoji: "🔧", verb: toolVerbDefault };
       const ts = new Date().toTimeString().slice(0, 8);
       const epoch = Math.floor(Date.now() / 1000);
       const msg = `${info.emoji} ${tool.target || tool.tool} ${info.verb}`;
@@ -664,19 +662,25 @@ function scanTranscriptForAgentWork(): void {
         ...(tool.detail ? { detail: tool.detail } : {}),
       });
 
-      try { fs.appendFileSync(HISTORY_FILE, entry + "\n"); } catch {}
+      // Skip history writes during initial scan to avoid stale agent data on restart
+      if (Date.now() - SERVER_START_TIME > 5000) {
+        try { fs.appendFileSync(HISTORY_FILE, entry + "\n"); } catch {}
+      }
     }
 
     // Update active agent tracking (exclude Chris — boss never "completes")
-    for (const tool of latestPerAgent.values()) {
-      if (tool.agentName === 'Chris') continue;
-      const existing = activeAgents.get(tool.agentName);
-      activeAgents.set(tool.agentName, {
-        lastActivity: Date.now(),
-        startTime: existing?.startTime || Date.now(),
-        agentName: tool.agentName,
-        agentType: tool.agentType,
-      });
+    // Skip during initial scan (first 5s) to avoid re-registering stale agents from previous sessions
+    if (Date.now() - SERVER_START_TIME > 5000) {
+      for (const tool of latestPerAgent.values()) {
+        if (tool.agentName === 'Chris') continue;
+        const existing = activeAgents.get(tool.agentName);
+        activeAgents.set(tool.agentName, {
+          lastActivity: Date.now(),
+          startTime: existing?.startTime || Date.now(),
+          agentName: tool.agentName,
+          agentType: tool.agentType,
+        });
+      }
     }
   }
 
@@ -739,32 +743,20 @@ function scanTranscriptForAgentWork(): void {
     try { fs.appendFileSync(HISTORY_FILE, usageEntry + '\n'); } catch {}
   }
 
-  // User input detection
+  // User input detection — only track lastUserMessage for internal use
+  // (history.jsonl recording is handled by user-prompt-hook.sh as "request" type)
   for (const line of lines) {
     try {
       const entry = JSON.parse(line);
       if (entry.type !== "user" || entry.message?.role !== "user") continue;
       if (!entry.message?.content) continue;
 
-      // content가 string인 경우 (Claude Code transcript 포맷)
       if (typeof entry.message.content === 'string') {
         const text = entry.message.content.trim();
         if (text.length < 3 || text.length > 200) continue;
         if (text.startsWith("<") || text.startsWith("{")) continue;
-        if (text.includes('JSON만') || text.includes('dialogue-generator') || text.includes('한마디')) continue;
-        if (text.includes('IT스타트업') || text.startsWith('👤')) continue;
-        const hash = `user:${text.slice(0, 60)}`;
-        if (recordedTextHashes.has(hash)) continue;
-        recordedTextHashes.add(hash);
-        const ts = new Date().toTimeString().slice(0, 8);
-        const epoch = Math.floor(Date.now() / 1000);
         let msg = text.replace(/\n/g, " ");
         if (msg.length > 100) msg = msg.slice(0, 100) + "...";
-        const userEntry = JSON.stringify({
-          ts, epoch, type: "user-input",
-          speaker: "You", role: "client", msg,
-        });
-        try { fs.appendFileSync(HISTORY_FILE, userEntry + "\n"); } catch {}
         lastUserMessage = msg;
         continue;
       }
@@ -774,24 +766,8 @@ function scanTranscriptForAgentWork(): void {
         const text = block.text.trim();
         if (text.length < 3 || text.length > 200) continue;
         if (text.startsWith("<") || text.startsWith("{")) continue;
-        // dialogue prompt + hook 대사 필터링
-        if (text.includes('JSON만') || text.includes('dialogue-generator') || text.includes('한마디')) continue;
-        if (text.includes('IT스타트업') || text.startsWith('👤')) continue;
-
-        const hash = `user:${text.slice(0, 60)}`;
-        if (recordedTextHashes.has(hash)) continue;
-        recordedTextHashes.add(hash);
-
-        const ts = new Date().toTimeString().slice(0, 8);
-        const epoch = Math.floor(Date.now() / 1000);
         let msg = text.replace(/\n/g, " ");
         if (msg.length > 100) msg = msg.slice(0, 100) + "...";
-
-        const userEntry = JSON.stringify({
-          ts, epoch, type: "user-input",
-          speaker: "You", role: "client", msg,
-        });
-        try { fs.appendFileSync(HISTORY_FILE, userEntry + "\n"); } catch {}
         lastUserMessage = msg;
         break;
       }
@@ -1029,8 +1005,8 @@ function scanTranscriptForAgentWork(): void {
       const msgId = merged.msgId;
       const chapterKey = `chapter:${msgId}`;
       if (recordedTextHashes.has(chapterKey)) continue;
-      recordedTextHashes.add(chapterKey);
-      chapterNewCount++;
+      // Don't register chapterKey yet — wait until we confirm response text exists.
+      // If only thinking arrived (streaming split), we skip and retry next scan.
 
       let thinkLines: string[] = [];
       let responseText = '';
@@ -1141,6 +1117,16 @@ function scanTranscriptForAgentWork(): void {
       flushThink(); // 마지막 thinking flush
 
       if (steps.length === 0) continue;
+
+      // 스트리밍 분할 방어: response text 없이 thinking만 도착한 경우
+      // chapterKey를 등록하지 않고 스킵 → 다음 스캔에서 response text 포함해 재처리
+      const hasNonThink = steps.some((s: any) => s.type !== 'think');
+      if (!hasNonThink) continue;
+
+      // response/tool 존재 확인됨 → chapterKey 등록 (중복 방지)
+      recordedTextHashes.add(chapterKey);
+      chapterNewCount++;
+
       if (!chapterTitle) {
         const fb = responseText.slice(0, 25);
         chapterTitle = responseText.length > 25 ? fb + '…' : (fb || '(무제)');
@@ -1241,8 +1227,12 @@ function scanSubagentFiles(): void {
     let stat: fs.Stats;
     try { stat = fs.statSync(filePath); } catch { continue; }
 
-    // First encounter: read from beginning (so completed subagents are captured)
+    // First encounter: skip files from previous sessions to avoid stale agent data
     if (!subagentOffsets.has(filePath)) {
+      if (stat.mtimeMs < SERVER_START_TIME) {
+        subagentOffsets.set(filePath, stat.size); // skip entirely — old session data
+        continue;
+      }
       subagentOffsets.set(filePath, 0);
     }
 
@@ -1293,7 +1283,7 @@ function scanSubagentFiles(): void {
   if (latestPerAgent.size > 0) {
     ensureHistoryFile();
     for (const tool of latestPerAgent.values()) {
-      const info = TOOL_INFO[tool.tool] || { emoji: "🔧", verb: "작업 중" };
+      const info = TOOL_INFO[tool.tool] || { emoji: "🔧", verb: toolVerbDefault };
       const ts = new Date().toTimeString().slice(0, 8);
       const epoch = Math.floor(Date.now() / 1000);
       const msg = `${info.emoji} ${tool.target || tool.tool} ${info.verb}`;
@@ -1305,16 +1295,21 @@ function scanSubagentFiles(): void {
         msg,
       });
 
-      try { fs.appendFileSync(HISTORY_FILE, histEntry + "\n"); } catch {}
+      // Skip history writes during initial scan to avoid re-recording stale agent work
+      if (Date.now() - SERVER_START_TIME > 5000) {
+        try { fs.appendFileSync(HISTORY_FILE, histEntry + "\n"); } catch {}
+      }
 
-      // Track for auto-completion (so done events get generated after 30s idle)
-      const existing = activeAgents.get(tool.agentName);
-      activeAgents.set(tool.agentName, {
-        lastActivity: Date.now(),
-        startTime: existing?.startTime || Date.now(),
-        agentName: tool.agentName,
-        agentType: tool.agentType,
-      });
+      // Track for auto-completion (skip during initial scan to avoid stale agents)
+      if (Date.now() - SERVER_START_TIME > 5000) {
+        const existing = activeAgents.get(tool.agentName);
+        activeAgents.set(tool.agentName, {
+          lastActivity: Date.now(),
+          startTime: existing?.startTime || Date.now(),
+          agentName: tool.agentName,
+          agentType: tool.agentType,
+        });
+      }
     }
   }
 
@@ -1705,6 +1700,14 @@ const server = Bun.serve({
           return new Response(JSON.stringify({ ok: false }), { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
         }
       }
+      case "/i18n":
+        return new Response(JSON.stringify(i18n), {
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+      case "/config":
+        return new Response(JSON.stringify(config), {
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
       case "/status":
         return new Response(JSON.stringify({ ok: true }), {
           headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
@@ -1809,20 +1812,23 @@ function checkAndActivateCTeam(): void {
     const content = buf.toString('utf-8');
     const lines = content.trim().split('\n');
 
-    // Find latest Chris work event
+    // Find latest Chris work event (detect tool from emoji/verb hints in i18n)
+    const parseHints: Record<string, string[]> = i18n.tool_verb_parse_hints || {};
     let chrisTool = '';
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
         const e = JSON.parse(lines[i]);
         if (e.type === 'work' && e.speaker === 'Chris' && e.role === 'boss') {
           const msg = e.msg || '';
-          if (msg.includes('📖') || msg.includes('확인 중')) chrisTool = 'Read';
-          else if (msg.includes('🔍') || msg.includes('찾는 중')) chrisTool = 'Glob';
-          else if (msg.includes('🔎') || msg.includes('검색 중')) chrisTool = 'Grep';
-          else if (msg.includes('✏️') || msg.includes('수정 중')) chrisTool = 'Edit';
-          else if (msg.includes('📝') || msg.includes('작성 중')) chrisTool = 'Write';
-          else if (msg.includes('💻') || msg.includes('실행 중')) chrisTool = 'Bash';
-          else chrisTool = 'Read';
+          let matched = false;
+          for (const [tool, hints] of Object.entries(parseHints)) {
+            if (Array.isArray(hints) && hints.some(h => msg.includes(h))) {
+              chrisTool = tool;
+              matched = true;
+              break;
+            }
+          }
+          if (!matched) chrisTool = 'Read';
           break;
         }
       } catch {}
@@ -1844,7 +1850,7 @@ function checkAndActivateCTeam(): void {
     activeCTeam.set(memberName, { name: memberName, tool: chrisTool, expireAt: now + C_TEAM_DURATION_MS });
     cTeamLastActivate.set(memberName, now);
 
-    const info = TOOL_INFO[chrisTool] || { emoji: '🔧', verb: '작업 중' };
+    const info = TOOL_INFO[chrisTool] || { emoji: '🔧', verb: toolVerbDefault };
     const ts = new Date().toTimeString().slice(0, 8);
     const epoch = Math.floor(now / 1000);
     const entry = JSON.stringify({
@@ -1863,6 +1869,7 @@ function checkAndActivateCTeam(): void {
 let dialogueQueueProcessing = false;
 
 async function processDialogueQueue(): Promise<void> {
+  if (!config.ai_dialogue) return; // ai_dialogue disabled → skip dialogue generation
   if (dialogueQueueProcessing) return;
   const exists = fs.existsSync(DIALOGUE_QUEUE_FILE);
   const size = exists ? fs.statSync(DIALOGUE_QUEUE_FILE).size : 0;
@@ -1893,13 +1900,19 @@ async function processDialogueQueue(): Promise<void> {
       const prompt = entry.prompt;
       if (!prompt) continue;
 
+      // Prepend language instruction based on config
+      const langPrefix = config.language === 'ko'
+        ? '' // Korean is default for the model
+        : `Respond in English only. `;
+      const fullPrompt = langPrefix + prompt;
+
       try {
         // claude --print (CLAUDECODE 제거로 중첩 방지 우회)
         const cleanEnv = { ...process.env, BACKSTAGE_DIALOGUE: '1' };
         delete cleanEnv.CLAUDECODE;
 
         // BACKSTAGE_DIALOGUE=1 환경변수로 hook 재귀 방지 (user-prompt-hook.sh에서 체크)
-        const proc = Bun.spawn(['claude', '--print', '--model', 'haiku', prompt], {
+        const proc = Bun.spawn(['claude', '--print', '--model', 'haiku', fullPrompt], {
           stdout: 'pipe',
           stderr: 'pipe',
           env: cleanEnv,
@@ -1963,6 +1976,11 @@ const transcriptScanTimer = setInterval(() => {
   }).catch(() => {});
 }, 2000);
 
+// Usage refresh: re-scan transcript every 30 seconds for accurate token data
+const usageRefreshTimer = setInterval(() => {
+  try { scanTranscriptUsage(); } catch {}
+}, 30_000);
+
 // Idle chat generator: every 20 seconds
 const idleChatTimer = setInterval(() => {
   try { generateIdleChat(); } catch {}
@@ -1996,6 +2014,7 @@ const idleCheckTimer = setInterval(() => {
 function shutdown(): void {
   console.log("\nShutting down...");
   clearInterval(transcriptScanTimer);
+  clearInterval(usageRefreshTimer);
   clearInterval(idleChatTimer);
   clearInterval(cTeamTimer);
   clearInterval(dialogueQueueTimer);

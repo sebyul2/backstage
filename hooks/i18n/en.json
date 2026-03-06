@@ -1,0 +1,72 @@
+{
+  "tool_verbs": {
+    "Read": {
+      "emoji": "📖",
+      "verb": "checking"
+    },
+    "Grep": {
+      "emoji": "🔎",
+      "verb": "searching"
+    },
+    "Edit": {
+      "emoji": "✏️",
+      "verb": "editing"
+    },
+    "Write": {
+      "emoji": "📝",
+      "verb": "writing"
+    },
+    "Bash": {
+      "emoji": "💻",
+      "verb": "running"
+    },
+    "Glob": {
+      "emoji": "🔍",
+      "verb": "finding"
+    }
+  },
+  "c_team": {
+    "Mia": "Bright and curious. Gets excited about data. Uses lol a lot",
+    "Kai": "Code craftsman. Obsessed with clean code. Sensitive to changes",
+    "Zoe": "Search expert. Gets excited by patterns. Analytical",
+    "Liam": "File organization freak. Structure expert. Systematic",
+    "Aria": "Loves creating. Excited about new files. Nervous about overwrites",
+    "Noah": "Execution lead. Serious about builds/tests. Emotional about results",
+    "Luna": "Careful observer. Strong on details. Quiet but sharp",
+    "Owen": "Full of energy. Loves new things. Optimistic",
+    "_default": "IT startup team member. Bright and cheerful"
+  },
+  "dialogue_prompt": {
+    "complete_template": "IT startup ${speaker}(${role}) completed task: ${task}. One-liner completion report. 15-25 chars English. JSON only: {\"lines\":[{\"speaker\":\"${speaker}\",\"msg\":\"line\"}]}",
+    "c_bubble_template": "IT startup ${speaker}(${desc}) reacts to this: ${data}. 15-30 chars English. JSON only: {\"lines\":[{\"speaker\":\"${speaker}\",\"msg\":\"line\"}]}"
+  },
+  "python_labels": {
+    "file": "File",
+    "lines": "lines",
+    "imports": "imports",
+    "imports_suffix": "",
+    "funcs": "funcs/classes",
+    "funcs_suffix": "",
+    "no_comments": "no comments",
+    "type": "type",
+    "minus_lines": "lines",
+    "plus_lines": "lines",
+    "fine_tuning": "fine tuning",
+    "large_edit": "large edit",
+    "function": "func",
+    "pattern": "pattern",
+    "matches": "matches",
+    "files_suffix": "files",
+    "command": "cmd",
+    "error_occurred": "error occurred",
+    "success": "success",
+    "test_passed": "tests passed",
+    "failed": "failed",
+    "bash_complete": "done"
+  },
+  "task_labels": {
+    "task_default": "task",
+    "task_done": "Task complete",
+    "done_suffix": " — Done!"
+  }
+}

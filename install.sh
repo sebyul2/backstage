@@ -83,6 +83,19 @@ if [ -f "$SCRIPT_DIR/hooks/characters.json" ]; then
   echo -e "  ${GREEN}✓${NC} hooks/characters.json"
 fi
 
+# hooks/i18n/ → hooks-i18n/ (language files for hook scripts)
+if [ -d "$SCRIPT_DIR/hooks/i18n" ]; then
+  mkdir -p "$PLUGIN_DIR/hooks-i18n"
+  cp "$SCRIPT_DIR/hooks/i18n/"*.json "$PLUGIN_DIR/hooks-i18n/"
+  echo -e "  ${GREEN}✓${NC} hooks/i18n/ → hooks-i18n/"
+fi
+
+# config.json (default, only if not exists)
+if [ ! -f "$PLUGIN_DIR/config.json" ]; then
+  echo '{"language":"en","ai_dialogue":true}' > "$PLUGIN_DIR/config.json"
+  echo -e "  ${GREEN}✓${NC} config.json (default)"
+fi
+
 # agents/dialogue-generator.md
 if [ -f "$SCRIPT_DIR/agents/dialogue-generator.md" ]; then
   cp "$SCRIPT_DIR/agents/dialogue-generator.md" "$PLUGIN_DIR/agents/"
@@ -194,7 +207,7 @@ echo ""
 echo "Updating plugin cache ..."
 
 PLUGIN_VERSION=$(jq -r '.version // "0.0.0"' "$SCRIPT_DIR/.claude-plugin/plugin.json" 2>/dev/null || echo "0.0.0")
-CACHE_DIR="$HOME/.claude/plugins/cache/backstage/claude-backstage/$PLUGIN_VERSION"
+CACHE_DIR="$HOME/.claude/plugins/cache/backstage/backstage/$PLUGIN_VERSION"
 
 mkdir -p "$CACHE_DIR"
 

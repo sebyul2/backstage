@@ -183,19 +183,15 @@ export class Renderer {
       }
     }
 
-    // Interior wall separator (cols 18-19)
-    if ((col === 18 || col === 19) && row > 0 && row < MAP_ROWS - 1) {
+    // Interior wall separator (col 14)
+    if (col === 14 && row > 0 && row < MAP_ROWS - 1) {
       ctx.fillStyle = PAL.wallBase;
       ctx.fillRect(x, y, TS, TS);
-      // Lighter inner face
-      if (col === 18) {
-        ctx.fillStyle = PAL.wallTop;
-        ctx.fillRect(x, y, 4, TS);
-      }
-      if (col === 19) {
-        ctx.fillStyle = PAL.wallTop;
-        ctx.fillRect(x + TS - 4, y, 4, TS);
-      }
+      // Lighter inner faces
+      ctx.fillStyle = PAL.wallTop;
+      ctx.fillRect(x, y, 4, TS);
+      ctx.fillStyle = PAL.wallTop;
+      ctx.fillRect(x + TS - 4, y, 4, TS);
     }
 
     // Subtle brick pattern
@@ -1594,14 +1590,14 @@ export class Renderer {
 
     // Section labels (between row 8 and row 11, on separator)
     ctx.fillStyle = '#60A5FA';
-    ctx.fillText('CHRIS TEAM', 4.5 * TS, 10.5 * TS);
+    ctx.fillText('CHRIS TEAM', 3.5 * TS, 10.5 * TS);
 
     ctx.fillStyle = '#34D399';
-    ctx.fillText('AGENTS', 14.5 * TS, 10.5 * TS);
+    ctx.fillText('AGENTS', 10.5 * TS, 10.5 * TS);
 
     // Break room label
     ctx.fillStyle = '#FFA300';
-    ctx.fillText('BREAK ROOM', 24.5 * TS, MAP_H - 10);
+    ctx.fillText('BREAK ROOM', 17.5 * TS, MAP_H - 10);
 
     ctx.globalAlpha = 1;
     ctx.textAlign = 'left';

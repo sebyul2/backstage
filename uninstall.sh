@@ -40,7 +40,14 @@ if [ -f "$GLOBAL_CLAUDE_MD" ]; then
     fi
 fi
 
-# 3. settings.json에서 backstage 관련 hooks 자동 제거
+# 3. 플러그인 캐시 삭제
+CACHE_DIR="$HOME/.claude/plugins/cache/backstage"
+if [ -d "$CACHE_DIR" ]; then
+    echo "Removing plugin cache: $CACHE_DIR"
+    rm -rf "$CACHE_DIR"
+fi
+
+# 4. settings.json에서 backstage 관련 hooks 자동 제거
 for SETTINGS in "$HOME/.claude/settings.json" ".claude/settings.local.json"; do
   if [ -f "$SETTINGS" ] && grep -q "backstage" "$SETTINGS"; then
     echo "Removing backstage hooks from $SETTINGS"

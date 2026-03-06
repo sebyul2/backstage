@@ -31,12 +31,12 @@ Then use AskUserQuestion to ask: "Backstage를 켜시겠습니까? / 끄시겠�
 
 Run this **single Bash command** (copy exactly, do not modify):
 ```bash
-mkdir -p ~/.claude/plugins/backstage && touch ~/.claude/plugins/backstage/enabled && lsof -ti:7777 | xargs kill 2>/dev/null; sleep 0.3; VIEWER_DIR="$(ls -d ~/.claude/plugins/cache/backstage/claude-backstage/*/viewer 2>/dev/null | sort -V | tail -1)"; [ -z "$VIEWER_DIR" ] && VIEWER_DIR=~/.claude/plugins/backstage/viewer; cd "$VIEWER_DIR" && nohup perl -e 'use POSIX "setsid"; setsid(); exec @ARGV' bun server.ts > /tmp/backstage-viewer.log 2>&1 & echo $! > ~/.claude/plugins/backstage/viewer.pid; sleep 1; lsof -ti:7777 > /dev/null 2>&1 && echo "OK: http://localhost:7777" || echo "FAIL: check /tmp/backstage-viewer.log"
+mkdir -p ~/.claude/plugins/backstage && touch ~/.claude/plugins/backstage/enabled && lsof -ti:7777 | xargs kill 2>/dev/null; sleep 0.3; VIEWER_DIR="$(ls -d ~/.claude/plugins/cache/backstage/backstage/*/viewer 2>/dev/null | sort -V | tail -1)"; [ -z "$VIEWER_DIR" ] && VIEWER_DIR=~/.claude/plugins/backstage/viewer; cd "$VIEWER_DIR" && nohup perl -e 'use POSIX "setsid"; setsid(); exec @ARGV' bun server.ts > /tmp/backstage-viewer.log 2>&1 & echo $! > ~/.claude/plugins/backstage/viewer.pid; sleep 1; lsof -ti:7777 > /dev/null 2>&1 && echo "OK: http://localhost:7777" || echo "FAIL: check /tmp/backstage-viewer.log"
 ```
 
 Then run this **second Bash command** to inject protocol into CLAUDE.md:
 ```bash
-PLUGIN_ROOT="$(ls -d ~/.claude/plugins/cache/backstage/claude-backstage/*/ 2>/dev/null | sort -V | tail -1)"; PROTO="$PLUGIN_ROOT/BACKSTAGE-PROTOCOL.md"; CLAUDE_MD="$PLUGIN_ROOT/CLAUDE.md"; if [ -f "$PROTO" ] && [ -f "$CLAUDE_MD" ]; then perl -i -pe "BEGIN { \$done=0 } if (/<!-- BACKSTAGE:START -->/ && !\$done) { \$done=1; print; open(F,'$PROTO'); while(<F>){print}; close(F); next }" "$CLAUDE_MD" && echo "Protocol injected into CLAUDE.md"; else echo "SKIP: protocol or CLAUDE.md not found"; fi
+PLUGIN_ROOT="$(ls -d ~/.claude/plugins/cache/backstage/backstage/*/ 2>/dev/null | sort -V | tail -1)"; PROTO="$PLUGIN_ROOT/BACKSTAGE-PROTOCOL.md"; CLAUDE_MD="$PLUGIN_ROOT/CLAUDE.md"; if [ -f "$PROTO" ] && [ -f "$CLAUDE_MD" ]; then perl -i -pe "BEGIN { \$done=0 } if (/<!-- BACKSTAGE:START -->/ && !\$done) { \$done=1; print; open(F,'$PROTO'); while(<F>){print}; close(F); next }" "$CLAUDE_MD" && echo "Protocol injected into CLAUDE.md"; else echo "SKIP: protocol or CLAUDE.md not found"; fi
 ```
 
 Report the output. Do not add extra commands.
@@ -50,7 +50,7 @@ rm -f ~/.claude/plugins/backstage/enabled; lsof -ti:7777 | xargs kill 2>/dev/nul
 
 Then run this **second Bash command** to strip protocol from CLAUDE.md:
 ```bash
-PLUGIN_ROOT="$(ls -d ~/.claude/plugins/cache/backstage/claude-backstage/*/ 2>/dev/null | sort -V | tail -1)"; CLAUDE_MD="$PLUGIN_ROOT/CLAUDE.md"; [ -f "$CLAUDE_MD" ] && perl -0777 -i -pe 's/(<!-- BACKSTAGE:START -->\n).*?(<!-- BACKSTAGE:END -->)/$1$2/s' "$CLAUDE_MD" && echo "Protocol stripped from CLAUDE.md" || echo "SKIP: CLAUDE.md not found"
+PLUGIN_ROOT="$(ls -d ~/.claude/plugins/cache/backstage/backstage/*/ 2>/dev/null | sort -V | tail -1)"; CLAUDE_MD="$PLUGIN_ROOT/CLAUDE.md"; [ -f "$CLAUDE_MD" ] && perl -0777 -i -pe 's/(<!-- BACKSTAGE:START -->\n).*?(<!-- BACKSTAGE:END -->)/$1$2/s' "$CLAUDE_MD" && echo "Protocol stripped from CLAUDE.md" || echo "SKIP: CLAUDE.md not found"
 ```
 
 Report the output. Do not add extra commands.

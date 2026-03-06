@@ -26,8 +26,18 @@ const RUN_SPEED = 1800;   // running to desk (1.5x)
 const IDLE_MIN = 4000;   // ms before break room wander
 const IDLE_MAX = 10000;
 const ARRIVE_DIST = 6;
-const DOOR_X = 19 * TILE_SIZE;
+const DOOR_X = 14.5 * TILE_SIZE;
 const DOOR_Y = 7.5 * TILE_SIZE;
+
+// Collision detection constants
+const COLLISION_DIST = 20;  // px - distance threshold for collision
+const BOUNCE_FORCE = 3;     // px - pushback distance
+const COLLISION_STUN = 400; // ms - stun duration after collision
+
+// Stuck detection constants
+const STUCK_CHECK_INTERVAL = 1000; // ms - position history sample interval
+const STUCK_WINDOW = 3;            // number of samples to look back
+const STUCK_THRESHOLD = 5;         // px - minimum movement over STUCK_WINDOW samples
 // Tool categories for visual display
 export const TOOL_ICONS = {
   'Read':  { icon: '📖', label: 'READ',  color: '#29ADFF' },
@@ -98,6 +108,10 @@ export class Character {
 
     // Stun timer: blocks all state logic while > 0 (used by whip knockback)
     this.stunTimer = 0;
+
+    // Stuck detection: position history sampled every STUCK_CHECK_INTERVAL ms
+    this._posHistory = [];      // Array of {x, y} snapshots
+    this._posTimer = 0;         // Accumulator for sampling interval
 
     // Physics reference (set by CharacterManager.initPhysics)
     this.physics = null;
@@ -200,7 +214,7 @@ export class Character {
     };
 
     // If in break room (past the wall), go through doorway first
-    if (this.x > 18 * TILE_SIZE) {
+    if (this.x > 14 * TILE_SIZE) {
       this.targetX = DOOR_X;
       this.targetY = DOOR_Y;
       this.state = S.RUNNING_TO_DESK;
@@ -272,7 +286,7 @@ export class Character {
     };
 
     // If in office (before the wall), go through doorway first
-    if (this.x < 19 * TILE_SIZE) {
+    if (this.x < 15 * TILE_SIZE) {
       this.targetX = DOOR_X;
       this.targetY = DOOR_Y;
       this.state = S.WALKING_TO_BREAK;
@@ -359,7 +373,7 @@ export class Character {
 
       case S.WALKING_TO_BREAK:
         // Fast in office (desk→door), normal in break room (door→break pos)
-        this._moveToward(dt, this.x < 19 * TILE_SIZE ? RUN_SPEED : WALK_SPEED);
+        this._moveToward(dt, this.x < 15 * TILE_SIZE ? RUN_SPEED : WALK_SPEED);
         break;
 
       case S.RUNNING_TO_DESK:
@@ -414,6 +428,52 @@ export class Character {
   }
 
   _moveToward(dt, speed) {
+    // Stuck detection: sample position every STUCK_CHECK_INTERVAL ms
+    this._posTimer += dt * 1000;
+    if (this._posTimer >= STUCK_CHECK_INTERVAL) {
+      this._posTimer -= STUCK_CHECK_INTERVAL;
+      this._posHistory.push({ x: this.x, y: this.y });
+      // Keep only the last STUCK_WINDOW + 1 samples
+      if (this._posHistory.length > STUCK_WINDOW + 1) {
+        this._posHistory.shift();
+      }
+
+      // Check if stuck: moved less than STUCK_THRESHOLD px over STUCK_WINDOW samples
+      if (this._posHistory.length === STUCK_WINDOW + 1) {
+        const oldest = this._posHistory[0];
+        const dx = this.x - oldest.x;
+        const dy = this.y - oldest.y;
+        const moved = Math.sqrt(dx * dx + dy * dy);
+
+        if (moved < STUCK_THRESHOLD) {
+          // Find a random adjacent walkable tile to break the deadlock
+          const { x: tx, y: ty } = pixelToTile(this.x, this.y);
+          const offsets = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
+          // Shuffle offsets for randomness
+          for (let i = offsets.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [offsets[i], offsets[j]] = [offsets[j], offsets[i]];
+          }
+          for (const [ox, oy] of offsets) {
+            const nx = tx + ox;
+            const ny = ty + oy;
+            // findPath returns a path if tile is walkable
+            const testPath = findPath(tx, ty, nx, ny);
+            if (testPath && testPath.length > 0) {
+              const pixel = tileToPixel(nx, ny);
+              this.path = null;
+              this.pathIndex = 0;
+              this.targetX = pixel.x;
+              this.targetY = pixel.y;
+              this._posHistory = [];
+              this._posTimer = 0;
+              break;
+            }
+          }
+        }
+      }
+    }
+
     // If no active path, calculate one via A*
     if (!this.path || this.path.length === 0) {
       const start = pixelToTile(this.x, this.y);
@@ -652,6 +712,79 @@ export class CharacterManager {
   update(dt) {
     for (const char of this.characters.values()) {
       char.update(dt);
+    }
+    this._checkCollisions();
+  }
+
+  _checkCollisions() {
+    // Walking states that can collide
+    const walkingStates = new Set([S.WALKING_BREAK, S.WALKING_TO, S.WALKING_TO_BREAK]);
+
+    // Collect eligible characters into an array for pair iteration
+    const eligible = [];
+    for (const char of this.characters.values()) {
+      // Skip Player (boss role), Chris (boss), and C-Team (seated)
+      if (char.role === 'boss' || char._isCTeam) continue;
+      // Skip stunned characters
+      if (char.stunTimer > 0) continue;
+      // Skip non-walking states
+      if (!walkingStates.has(char.state)) continue;
+      eligible.push(char);
+    }
+
+    // Check each pair once (i < j)
+    for (let i = 0; i < eligible.length; i++) {
+      for (let j = i + 1; j < eligible.length; j++) {
+        const a = eligible[i];
+        const b = eligible[j];
+
+        // Skip if either became stunned from a previous iteration in this frame
+        if (a.stunTimer > 0 || b.stunTimer > 0) continue;
+
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < COLLISION_DIST) {
+          // Compute push direction (normalised); handle degenerate case
+          let nx, ny;
+          if (dist < 0.001) {
+            // Perfectly overlapping — push in random direction
+            const angle = Math.random() * Math.PI * 2;
+            nx = Math.cos(angle);
+            ny = Math.sin(angle);
+          } else {
+            nx = dx / dist;
+            ny = dy / dist;
+          }
+
+          // Push a away from b, b away from a
+          a.x -= nx * BOUNCE_FORCE;
+          a.y -= ny * BOUNCE_FORCE;
+          b.x += nx * BOUNCE_FORCE;
+          b.y += ny * BOUNCE_FORCE;
+
+          // Sync physics bodies if present
+          if (a.physics && a.physics.enabled) {
+            a.physics.setPosition(a.name, a.x, a.y);
+            a.physics.setVelocity(a.name, 0, 0);
+          }
+          if (b.physics && b.physics.enabled) {
+            b.physics.setPosition(b.name, b.x, b.y);
+            b.physics.setVelocity(b.name, 0, 0);
+          }
+
+          // Clear paths so both recalculate after stun
+          a.path = null;
+          a.pathIndex = 0;
+          b.path = null;
+          b.pathIndex = 0;
+
+          // Apply stun
+          a.stunTimer = COLLISION_STUN;
+          b.stunTimer = COLLISION_STUN;
+        }
+      }
     }
   }
 

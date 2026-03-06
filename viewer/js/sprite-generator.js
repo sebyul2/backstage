@@ -138,44 +138,73 @@ function drawLegs(ctx, baseX, baseY, legShift, hairShades) {
   rect(ctx, rx + 1, baseY, 3, 7, PANTS_BASE);
   px(ctx, rx + 2, baseY, PANTS_HIGHLIGHT);
 
-  // Shoes
+  // Shoes (toes point downward for perspective)
   const sy = baseY + 7;
   // Left shoe
-  rect(ctx, lx - 1, sy, 6, 3, SHOE_DARK);
-  rect(ctx, lx, sy, 5, 2, SHOE_BASE);
+  rect(ctx, lx, sy, 5, 3, SHOE_DARK);
+  rect(ctx, lx, sy + 1, 5, 2, SHOE_DARK);   // extend down
+  rect(ctx, lx + 1, sy, 3, 2, SHOE_BASE);
   px(ctx, lx + 1, sy, SHOE_HIGHLIGHT);
   // Right shoe
-  rect(ctx, rx - 1, sy, 6, 3, SHOE_DARK);
-  rect(ctx, rx, sy, 5, 2, SHOE_BASE);
+  rect(ctx, rx, sy, 5, 3, SHOE_DARK);
+  rect(ctx, rx, sy + 1, 5, 2, SHOE_DARK);   // extend down
+  rect(ctx, rx + 1, sy, 3, 2, SHOE_BASE);
   px(ctx, rx + 1, sy, SHOE_HIGHLIGHT);
 }
 
 function drawLegsSide(ctx, baseX, baseY, legShift, facingLeft) {
-  // Side view legs - slightly overlapping
+  // Side view legs - offset to align with torso center
+  const legOfs = facingLeft ? -2 : 1; // match torso side offset
   const frontLeg = facingLeft ? -2 : 0;
   const backLeg = facingLeft ? 1 : -3;
 
   // Back leg (slightly behind)
-  const bx = baseX + backLeg + (facingLeft ? legShift : -legShift);
+  const bx = baseX + legOfs + backLeg + (facingLeft ? legShift : -legShift);
   rect(ctx, bx, baseY + 1, 5, 7, PANTS_DARK);
   rect(ctx, bx + 1, baseY + 1, 3, 6, darken(PANTS_BASE, 0.1));
-  // Back shoe
-  rect(ctx, bx - 1, baseY + 7, 6, 3, SHOE_DARK);
+  // Back shoe (toe points in facing direction)
+  if (facingLeft) {
+    rect(ctx, bx - 1, baseY + 7, 6, 3, SHOE_DARK);
+  } else {
+    rect(ctx, bx, baseY + 7, 6, 3, SHOE_DARK);
+  }
 
   // Front leg
-  const fx = baseX + frontLeg + (facingLeft ? -legShift : legShift);
+  const fx = baseX + legOfs + frontLeg + (facingLeft ? -legShift : legShift);
   rect(ctx, fx, baseY, 5, 8, PANTS_DARK);
   rect(ctx, fx + 1, baseY, 3, 7, PANTS_BASE);
   px(ctx, fx + 2, baseY, PANTS_HIGHLIGHT);
-  // Front shoe
-  rect(ctx, fx - 1, baseY + 7, 6, 3, SHOE_DARK);
-  rect(ctx, fx, baseY + 7, 5, 2, SHOE_BASE);
-  px(ctx, fx + 1, baseY + 7, SHOE_HIGHLIGHT);
+  // Front shoe (toe points in facing direction)
+  if (facingLeft) {
+    rect(ctx, fx - 1, baseY + 7, 6, 3, SHOE_DARK);
+    rect(ctx, fx - 1, baseY + 7, 5, 2, SHOE_BASE);
+    px(ctx, fx, baseY + 7, SHOE_HIGHLIGHT);
+  } else {
+    rect(ctx, fx, baseY + 7, 6, 3, SHOE_DARK);
+    rect(ctx, fx + 1, baseY + 7, 5, 2, SHOE_BASE);
+    px(ctx, fx + 3, baseY + 7, SHOE_HIGHLIGHT);
+  }
 }
 
 function drawLegsBack(ctx, baseX, baseY, legShift) {
-  // Back view same as front structurally
-  drawLegs(ctx, baseX, baseY, legShift, { dark: PANTS_DARK });
+  // Back view - shoes point upward for perspective
+  const lx = baseX - 5 + legShift;
+  rect(ctx, lx, baseY, 5, 8, PANTS_DARK);
+  rect(ctx, lx + 1, baseY, 3, 7, PANTS_BASE);
+  const rx = baseX + 2 - legShift;
+  rect(ctx, rx, baseY, 5, 8, PANTS_DARK);
+  rect(ctx, rx + 1, baseY, 3, 7, PANTS_BASE);
+
+  // Shoes (toes point up/inward for back perspective)
+  const sy = baseY + 7;
+  // Left shoe
+  rect(ctx, lx, sy, 5, 2, SHOE_DARK);
+  rect(ctx, lx + 1, sy - 1, 3, 1, SHOE_DARK);  // toe extends up
+  rect(ctx, lx + 1, sy, 3, 1, SHOE_BASE);
+  // Right shoe
+  rect(ctx, rx, sy, 5, 2, SHOE_DARK);
+  rect(ctx, rx + 1, sy - 1, 3, 1, SHOE_DARK);  // toe extends up
+  rect(ctx, rx + 1, sy, 3, 1, SHOE_BASE);
 }
 
 function drawTorso(ctx, baseX, baseY, shirtShades, hairShades) {
@@ -286,11 +315,13 @@ function drawHeadFront(ctx, cx, cy, hairShades, glasses) {
   const x = cx - headW / 2;
   const y = cy;
 
-  // Head outline using hair dark shade for softer look
-  rect(ctx, x, y + 1, headW, headH - 1, hairShades.dark);
-  rect(ctx, x + 1, y, headW - 2, headH, hairShades.dark);
+  // Head outline using hair dark shade for softer look (rounded bottom corners)
+  rect(ctx, x, y + 1, headW, headH - 2, hairShades.dark);
+  rect(ctx, x + 1, y, headW - 2, headH - 1, hairShades.dark);
+  rect(ctx, x + 2, y, headW - 4, headH, hairShades.dark);
   // Skin fill
-  rect(ctx, x + 1, y + 1, headW - 2, headH - 2, SKIN_BASE);
+  rect(ctx, x + 1, y + 1, headW - 2, headH - 3, SKIN_BASE);
+  rect(ctx, x + 2, y + 1, headW - 4, headH - 2, SKIN_BASE);
   // Skin shadow (right side of face)
   rect(ctx, cx + 2, y + 2, 5, headH - 5, SKIN_SHADOW);
   // Skin highlight (left cheek area)
@@ -343,11 +374,13 @@ function drawHeadSide(ctx, cx, cy, hairShades, glasses, facingLeft) {
   const x = facingLeft ? cx - headW / 2 - 1 : cx - headW / 2 + 1;
   const y = cy;
 
-  // Head outline
-  rect(ctx, x, y + 1, headW, headH - 1, hairShades.dark);
-  rect(ctx, x + 1, y, headW - 2, headH, hairShades.dark);
+  // Head outline (rounded bottom corners)
+  rect(ctx, x, y + 1, headW, headH - 2, hairShades.dark);
+  rect(ctx, x + 1, y, headW - 2, headH - 1, hairShades.dark);
+  rect(ctx, x + 2, y, headW - 4, headH, hairShades.dark);
   // Skin fill
-  rect(ctx, x + 1, y + 1, headW - 2, headH - 2, SKIN_BASE);
+  rect(ctx, x + 1, y + 1, headW - 2, headH - 3, SKIN_BASE);
+  rect(ctx, x + 2, y + 1, headW - 4, headH - 2, SKIN_BASE);
   // Shadow on far side
   if (facingLeft) {
     rect(ctx, x + headW - 4, y + 2, 3, headH - 5, SKIN_SHADOW);
@@ -373,9 +406,9 @@ function drawHeadSide(ctx, cx, cy, hairShades, glasses, facingLeft) {
   // Eyebrow
   rect(ctx, eyeX, eyeY - 2, 3, 1, hairShades.dark);
 
-  // Mouth
-  const mouthX = facingLeft ? cx - 3 : cx + 1;
-  rect(ctx, mouthX, cy + 12, 2, 1, MOUTH_COLOR);
+  // Mouth (positioned at face front, below nose)
+  const mouthX = facingLeft ? cx - 5 : cx + 3;
+  rect(ctx, mouthX, cy + 11, 2, 1, MOUTH_COLOR);
 
   // Nose hint (1px)
   const noseX = facingLeft ? cx - 5 : cx + 4;
@@ -1002,8 +1035,8 @@ function drawCharacterFrame(ctx, config, dir, frame, isIdle) {
 
   // Walk animation offsets
   const bob = isIdle ? (frame === 0 ? 0 : -1) : ([0, -1, 0, -1][frame]);
-  const legShift = isIdle ? 0 : ([0, 2, 0, -2][frame]);
-  const armSwing = isIdle ? 0 : ([0, 1, 0, -1][frame]);
+  const legShift = isIdle ? 0 : ([0, 1, 0, -1][frame]);
+  const armSwing = isIdle ? ([0, 1][frame]) : ([0, 1, 0, -1][frame]);
 
   // Y positions (from top of 48px frame)
   const headY = 6 + bob;
