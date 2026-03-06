@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="#features">Features</a> •
   <a href="#installation">Installation</a> •
+  <a href="#features">Features</a> •
   <a href="#how-it-works">How It Works</a> •
   <a href="#characters">Characters</a> •
   <a href="#configuration">Configuration</a> •
@@ -24,6 +24,58 @@
 When Claude delegates work to sub-agents, each one becomes a character — they walk to their desk, sit down, code away, and head to the break room when they're done. All in real time, all in pixel art.
 
 > Bored between tasks? Wander around the office and press **Spacebar** — your character might have something to say.
+
+---
+
+## Installation
+
+### Prerequisites
+
+| Tool | Purpose |
+|------|---------|
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | CLI for Claude |
+| [Bun](https://bun.sh) | Server runtime |
+| [jq](https://jqlang.github.io/jq/) | JSON processing in hooks |
+
+### Option 1: Claude Code Plugin (Recommended)
+
+Add the marketplace and install the plugin:
+
+```bash
+claude plugin marketplace add https://github.com/sebyul2/backstage.git
+claude plugin install backstage
+```
+
+### Option 2: Manual Install
+
+```bash
+git clone https://github.com/sebyul2/backstage.git
+cd backstage
+./install.sh
+```
+
+### Start the viewer
+
+In Claude Code, run:
+```
+/backstage:server on
+```
+
+Then open **http://localhost:7777** in your browser. That's it — the office is open for business.
+
+The server starts automatically when you run the command, and shuts down after 10 minutes of inactivity (no browser tabs open).
+
+### Uninstall
+
+```bash
+# If installed via plugin system:
+claude plugin uninstall backstage
+
+# If installed manually:
+./uninstall.sh
+```
+
+Removes all plugin files, hooks, cache, and configuration cleanly. No leftovers.
 
 ---
 
@@ -114,45 +166,6 @@ This feature uses `claude --print` with Haiku for fast, cheap dialogue generatio
 ```
 
 When **off**, characters still move around and work — they just don't chat. The office stays alive, just quieter.
-
----
-
-## Installation
-
-### Prerequisites
-
-| Tool | Purpose |
-|------|---------|
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | CLI for Claude |
-| [Bun](https://bun.sh) | Server runtime |
-| [jq](https://jqlang.github.io/jq/) | JSON processing in hooks |
-
-### Install
-
-```bash
-git clone https://github.com/anthropics/claude-backstage.git
-cd claude-backstage
-./install.sh
-```
-
-### Start the viewer
-
-In Claude Code, run:
-```
-/backstage:server on
-```
-
-Then open **http://localhost:7777** in your browser. That's it — the office is open for business.
-
-The server starts automatically when you run the command, and shuts down after 10 minutes of inactivity (no browser tabs open).
-
-### Uninstall
-
-```bash
-./uninstall.sh
-```
-
-Removes all plugin files, hooks, cache, and configuration cleanly. No leftovers.
 
 ---
 

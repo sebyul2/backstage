@@ -5,8 +5,8 @@
   "author": {
     "name": "aster"
   },
-  "homepage": "https://bitbucket.org/spooncast/claude-backstage",
-  "repository": "https://bitbucket.org/spooncast/claude-backstage",
+  "homepage": "https://github.com/sebyul2/backstage",
+  "repository": "https://github.com/sebyul2/backstage",
   "license": "MIT",
   "keywords": ["pixel-art", "office", "agents", "viewer", "dialogue"]
 }
