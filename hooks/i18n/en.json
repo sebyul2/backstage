@@ -37,8 +37,9 @@
     "_default": "IT startup team member. Bright and cheerful"
   },
   "dialogue_prompt": {
+    "assign_template": "IT startup office. Chris(boss,witty+blunt) assigns to ${speaker}(${desc}): \"${task}\". Rules: mention specific task content, dev humor required, no generic phrases, each speaks 2-3 times, 30-50 chars/line. JSON only: {\"lines\":[{\"speaker\":\"boss\",\"msg\":\"..\"},{\"speaker\":\"agent\",\"msg\":\"..\"}]}",
     "complete_template": "IT startup ${speaker}(${role}) completed task: ${task}. One-liner completion report. 15-25 chars English. JSON only: {\"lines\":[{\"speaker\":\"${speaker}\",\"msg\":\"line\"}]}",
-    "c_bubble_template": "IT startup ${speaker}(${desc}) reacts to this: ${data}. 15-30 chars English. JSON only: {\"lines\":[{\"speaker\":\"${speaker}\",\"msg\":\"line\"}]}"
+    "c_bubble_template": "IT startup. ${speaker}(${desc}) working on: ${data}. Short chat with Chris(boss). Dev humor required, mention specific work, each speaks 1-2 times, 20-50 chars/line. JSON only: {\"lines\":[{\"speaker\":\"boss\",\"msg\":\"..\"},{\"speaker\":\"${speaker}\",\"msg\":\"..\"}]}"
   },
   "python_labels": {
     "file": "File",

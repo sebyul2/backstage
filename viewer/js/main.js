@@ -282,7 +282,11 @@ function handleSSEEvent(entry) {
   // Skip duplicate events (hook + transcript scanner can both write same event)
   if (_isDuplicate(entry)) return;
 
-  addChatMessage(entry);
+  // 정보성/내부 이벤트는 CHAT 뷰에서 필터 (캔버스에만 표시)
+  const chatHidden = new Set(['think', 'work', 'work-done', 'c-active', 'c-idle', 'agent-status']);
+  if (!chatHidden.has(type)) {
+    addChatMessage(entry);
+  }
 
   switch (type) {
     case 'assign':     handleAssign(entry, lines); break;
@@ -324,9 +328,17 @@ function handleAssign(entry, lines) {
   }
 
   if (agent) {
-    // Agent lifecycle: assign task + run to desk
+    // Agent lifecycle: assign task, speak first, then run to desk
     agent.assignTask(entry.msg || 'task');
-    agent.workAtDesk();
+    // 대사가 있으면 끝난 후 이동, 없으면 즉시
+    const hasDialogue = (lines && lines.length > 0) || entry.msg;
+    if (hasDialogue) {
+      const lineCount = (lines && lines.length > 0) ? lines.length : 1;
+      const delay = lineCount * 3000; // 라인당 ~3초
+      setTimeout(() => agent.workAtDesk(), delay);
+    } else {
+      agent.workAtDesk();
+    }
   }
 }
 
@@ -337,15 +349,14 @@ function handleDone(entry, lines) {
 
   const agent = agentName ? characters.get(agentName) : null;
 
-  if (lines && lines.length > 0) {
-    showDialogueLines(lines, 'done', entry);
-  } else if (entry.msg) {
+  // AI 대화 OFF(fallback)인 경우에만 완료 대사 표시
+  // AI 생성 done은 lines가 있고, fallback은 msg만 있음
+  if (!lines && entry.msg) {
     const speaker = agentName || 'Agent';
     bubbles.add(speaker, entry.msg, 'done');
   }
 
   if (agent) {
-    // Agent lifecycle: complete task + walk back to break room
     agent.completeTask();
   }
 }
@@ -513,6 +524,13 @@ function handleTaskUpdate(entry) {
   }
 
   if (task && status) {
+    // deleted 요청: completed 태스크는 유지, pending/in_progress만 제거
+    if (status === 'deleted') {
+      if (task.status !== 'completed') {
+        dashboardState.tasks = dashboardState.tasks.filter(t => t !== task);
+      }
+      return;
+    }
     task.status = status;
   }
 }
@@ -753,10 +771,16 @@ function appendChatLine(speaker, text, type, ts, entry) {
   div.className = `chat-msg type-${type || 'talk'}`;
   const timeStr = ts || new Date().toTimeString().slice(0, 5);
 
+  // 사용자 요청이 길면 말줄임표 (상세는 Chris 작업노트에서 확인)
+  let displayText = text;
+  if (type === 'request' && text.length > 80) {
+    displayText = text.slice(0, 80) + '…';
+  }
+
   div.innerHTML =
     `<span class="time">${timeStr.slice(0, 5)}</span>` +
     `<span class="speaker speaker-${speaker}">${speaker}</span> ` +
-    `<span class="text">${escapeHtml(text)}</span>`;
+    `<span class="text">${escapeHtml(displayText)}</span>`;
 
   if (entry && entry.detail) {
     div.classList.add('has-detail');
@@ -865,16 +889,34 @@ function init() {
     renderer._hoverMouse = { x: mx, y: my };
 
     // 커서 변경
-    if (renderer._taskHitboxes) {
-      let onTask = false;
-      for (const hb of renderer._taskHitboxes) {
-        if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
-          onTask = true;
+    let onClickable = false;
+    // Chris 캐릭터
+    const chris = characters.get('Chris');
+    if (chris && mx >= chris.x - 20 && mx <= chris.x + 20 && my >= chris.y - 32 && my <= chris.y + 8) {
+      onClickable = true;
+    }
+    // paperStack (plan note)
+    if (!onClickable) {
+      for (const f of furniture) {
+        if (f.type !== 'paperStack') continue;
+        const fx = f.x * TILE_SIZE, fy = f.y * TILE_SIZE;
+        const fw = f.w * TILE_SIZE, fh = f.h * TILE_SIZE;
+        if (mx >= fx && mx <= fx + fw && my >= fy && my <= fy + fh) {
+          onClickable = true;
           break;
         }
       }
-      canvas.style.cursor = onTask ? 'pointer' : 'default';
     }
+    // Task hitboxes
+    if (!onClickable && renderer._taskHitboxes) {
+      for (const hb of renderer._taskHitboxes) {
+        if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
+          onClickable = true;
+          break;
+        }
+      }
+    }
+    canvas.style.cursor = onClickable ? 'pointer' : 'default';
   });
   canvas.addEventListener('mouseleave', () => {
     renderer._hoverMouse = null;
@@ -929,10 +971,14 @@ function init() {
 
     // 서브에이전트 캐릭터 클릭 감지 (48x48 hitbox)
     for (const char of characters.characters.values()) {
-      if (!char || char.name === 'Chris' || char.name === 'Player' || char._isCTeam) continue;
+      if (!char || char.name === 'Chris' || char.name === 'Player') continue;
       const cx = char.x, cy = char.y;
       if (mx >= cx - 16 && mx <= cx + 32 && my >= cy - 32 && my <= cy + 16) {
-        showAgentInfoPopup(char.name, e.clientX, e.clientY);
+        if (char._isCTeam) {
+          showCTeamLogPopup(char.name, e.clientX, e.clientY);
+        } else {
+          showAgentInfoPopup(char.name, e.clientX, e.clientY);
+        }
         return;
       }
     }
@@ -1739,6 +1785,94 @@ async function showChrisLogPopup() {
 
   overlay.appendChild(popup);
   document.body.appendChild(overlay);
+}
+
+// ─── C-Team 대화 로그 팝업 ──────────────────────────────────────────
+
+async function showCTeamLogPopup(name, clientX, clientY) {
+  document.querySelectorAll('.agent-info-overlay').forEach(el => el.remove());
+
+  const canvasEl = document.getElementById('game');
+  const canvasRect = canvasEl.getBoundingClientRect();
+  const centerX = canvasRect.left + canvasRect.width / 2;
+  const centerY = canvasRect.top + canvasRect.height / 2;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'agent-info-overlay';
+  Object.assign(overlay.style, {
+    position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
+    background: 'rgba(0,0,0,0.5)', zIndex: '10000',
+  });
+
+  const panel = document.createElement('div');
+  Object.assign(panel.style, {
+    position: 'absolute',
+    left: centerX + 'px', top: centerY + 'px',
+    transform: 'translate(-50%, -50%)',
+    width: '420px', maxWidth: '70vw', maxHeight: '60vh',
+    background: '#1D2B53', border: '3px solid #FFA300', borderRadius: '8px',
+    padding: '20px 24px', fontFamily: 'Menlo, Consolas, monospace',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.6)', overflowY: 'auto',
+  });
+
+  const closeBtn = document.createElement('div');
+  closeBtn.textContent = '✕';
+  Object.assign(closeBtn.style, {
+    position: 'absolute', top: '10px', right: '10px',
+    width: '22px', height: '22px', background: '#C0392B', borderRadius: '4px',
+    color: '#fff', fontSize: '13px', display: 'flex', alignItems: 'center',
+    justifyContent: 'center', cursor: 'pointer', lineHeight: '1', userSelect: 'none',
+  });
+  closeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); overlay.remove(); });
+
+  const header = document.createElement('div');
+  header.textContent = name + ' — Loading...';
+  Object.assign(header.style, {
+    fontSize: '14px', fontWeight: 'bold', color: '#FFA300',
+    marginBottom: '12px', paddingRight: '28px',
+  });
+
+  const body = document.createElement('div');
+  Object.assign(body.style, { fontSize: '11px', color: '#C2C3C7', lineHeight: '1.6' });
+
+  panel.appendChild(closeBtn);
+  panel.appendChild(header);
+  panel.appendChild(body);
+  overlay.appendChild(panel);
+
+  overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+  const escHandler = (ev) => {
+    if (ev.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); }
+  };
+  document.addEventListener('keydown', escHandler);
+  document.body.appendChild(overlay);
+
+  try {
+    const res = await fetch('/c-team-info?name=' + encodeURIComponent(name));
+    if (res.ok) {
+      const data = await res.json();
+      header.textContent = name + ' (C-Team)';
+
+      if (data.events && data.events.length > 0) {
+        for (const ev of data.events) {
+          const line = document.createElement('div');
+          const msgText = (ev.msg || '').slice(0, 120);
+          const typeLabel = ev.type === 'c-bubble' ? '💬' : '🔧';
+          line.textContent = (ev.ts || '') + ' ' + typeLabel + ' ' + msgText;
+          Object.assign(line.style, {
+            fontSize: '10px', color: ev.type === 'c-bubble' ? '#FFA300' : '#8B93A1',
+            padding: '3px 0', borderBottom: '1px solid #FFA30020',
+          });
+          body.appendChild(line);
+        }
+      } else {
+        body.textContent = 'No recent activity';
+        body.style.color = '#8B93A1';
+      }
+    }
+  } catch (err) {
+    body.textContent = 'Failed to load';
+  }
 }
 
 // ─── 에이전트 정보 팝업 ──────────────────────────────────────────

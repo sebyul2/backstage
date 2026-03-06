@@ -187,7 +187,7 @@ export class BubbleManager {
     // Position bubble above character, centered (clamp to canvas top)
     const bx = cx - width / 2;
     let by = cy - height - BUBBLE_TAIL_H;
-    if (by < 2) by = 2; // 상단 잘림 방지
+    if (by < 42) by = 42; // 상단 UI 영역(progress bar 등) 아래로 clamp
 
     ctx.save();
     ctx.globalAlpha = alpha;

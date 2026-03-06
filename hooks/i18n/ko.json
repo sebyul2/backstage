@@ -37,8 +37,9 @@
     "_default": "IT 스타트업 팀원. 밝고 유쾌함"
   },
   "dialogue_prompt": {
+    "assign_template": "IT스타트업 사무실. Chris(팀장,까칠+위트)가 ${speaker}(${desc})에게 업무 지시: \"${task}\". 한국어 대화. 규칙: 작업내용 구체적 언급, 개발자유머/드립 필수, 뻔한말 금지, 각자 2-3번, 30-50자/줄. JSON만: {\"lines\":[{\"speaker\":\"boss\",\"msg\":\"..\"},{\"speaker\":\"agent\",\"msg\":\"..\"}]}",
     "complete_template": "IT스타트업 ${speaker}(${role})가 작업 완료: ${task}. 완료 보고 한마디. 15-25자 한국어. JSON만: {\"lines\":[{\"speaker\":\"${speaker}\",\"msg\":\"대사\"}]}",
-    "c_bubble_template": "IT스타트업 ${speaker}(${desc})가 이 상황을 보고 한마디: ${data}. 15-30자 한국어. JSON만: {\"lines\":[{\"speaker\":\"${speaker}\",\"msg\":\"대사\"}]}"
+    "c_bubble_template": "IT스타트업. ${speaker}(${desc}) 작업중: ${data}. Chris(팀장)와 짧은 수다. 개발자유머/드립 필수, 작업내용 구체적 언급, 각자 1-2번, 20-50자/줄, 한국어. JSON만: {\"lines\":[{\"speaker\":\"boss\",\"msg\":\"..\"},{\"speaker\":\"${speaker}\",\"msg\":\"..\"}]}"
   },
   "python_labels": {
     "file": "파일",

@@ -125,8 +125,8 @@ if [ "$tool_name" = "TaskUpdate" ]; then
     fi
 fi
 
-# ── dialogue-generator Task 결과 처리 ────────────────────────────
-if [ "$tool_name" = "Task" ]; then
+# ── dialogue-generator Task/Agent 결과 처리 ────────────────────────────
+if [ "$tool_name" = "Task" ] || [ "$tool_name" = "Agent" ]; then
     agent_type=$(echo "$input" | jq -r '.tool_input.subagent_type // .tool_input.agent // "unknown"')
 
     if echo "$agent_type" | grep -q "dialogue-generator"; then
@@ -220,39 +220,12 @@ if [ "$tool_name" = "Task" ]; then
     fi
 fi
 
-# ── 일반 Task 완료 시: complete 대화 요청 ────────────────────────
-if [ "$tool_name" = "Task" ]; then
+# ── 일반 Task/Agent 완료 시: AI 대화 생성 없이 조용히 완료 ────────────────
+# (완료 대사는 AI 대화 OFF일 때 fallback만 표시, ON이면 assign 시점에서만 대화)
+if [ "$tool_name" = "Task" ] || [ "$tool_name" = "Agent" ]; then
     agent_type=$(echo "$input" | jq -r '.tool_input.subagent_type // "unknown"')
-
     if ! echo "$agent_type" | grep -q "dialogue-generator"; then
-        case "$agent_type" in
-            explore|explore-medium) agent_name="Jake" ;;
-            oracle|oracle-medium) agent_name="David" ;;
-            oracle-low) agent_name="Danny" ;;
-            sisyphus-junior) agent_name="Kevin" ;;
-            sisyphus-junior-low) agent_name="Ken" ;;
-            sisyphus-junior-high) agent_name="Karl" ;;
-            frontend-engineer*) agent_name="Sophie" ;;
-            document-writer) agent_name="Emily" ;;
-            librarian*) agent_name="Michael" ;;
-            prometheus) agent_name="Alex" ;;
-            momus) agent_name="Rachel" ;;
-            metis) agent_name="Tom" ;;
-            qa-tester) agent_name="Sam" ;;
-            *) agent_name="Agent" ;;
-        esac
-
-        _task_default=$(jq -r '.task_labels.task_default // "task"' "$_I18N" 2>/dev/null)
-        description=$(echo "$input" | jq -r ".tool_input.description // \"$_task_default\"")
-        # 실제 결과 요약 추출 (첫 300자)
-        result_text=$(echo "$input" | jq -r '.tool_response.content[0].text // ""' | head -c 300)
-
-        # 큐에 대화 생성 요청 기록 (server.ts가 소비)
-        mkdir -p "$(dirname "$DIALOGUE_QUEUE_FILE")"
-        _tpl=$(jq -r '.dialogue_prompt.complete_template // "IT startup ${speaker}(${role}) completed: ${task}. One-liner. 15-25 chars. JSON only: {\"lines\":[{\"speaker\":\"${speaker}\",\"msg\":\"line\"}]}"' "$_I18N" 2>/dev/null)
-        _prompt=$(echo "$_tpl" | sed "s/\${speaker}/$agent_name/g; s/\${role}/$agent_type/g; s/\${task}/$description/g")
-        jq -nc --arg ep "$(date +%s)" --arg speaker "$agent_name" --arg role "$agent_type" --arg task "$description" --arg dtype "complete" --arg prompt "$_prompt" \
-            '{epoch:($ep|tonumber),speaker:$speaker,role:$role,type:$dtype,prompt:$prompt}' >> "$DIALOGUE_QUEUE_FILE"
+        # dialogue-generator가 아닌 일반 에이전트 완료 → 아무것도 안 함
         exit 0
     fi
 fi
@@ -314,142 +287,38 @@ case "$tool_name" in
         ;;
 esac
 
-# ── C-Team AI 대화 + 데이터 (도구별 3번째마다, 각 도구 담당 캐릭터가 대화) ──
-C_COUNTER_DIR="$PLUGIN_DIR/c-counters"
-mkdir -p "$C_COUNTER_DIR"
+# ── C-Team AI 대화 + 데이터 (최소 20초 간격, 각 도구 담당 캐릭터가 대화) ──
+C_BUBBLE_LAST_FILE="$PLUGIN_DIR/c-bubble-last-epoch.txt"
+C_BUBBLE_INTERVAL=20
 
 case "$tool_name" in
     Read|Edit|Grep|Glob|Write|Bash)
-        # 도구별 개별 카운터 (Read 3번째→Liam, Bash 3번째→Zoe 등 분산)
-        C_COUNTER_FILE="$C_COUNTER_DIR/$tool_name.txt"
-        counter=0
-        [ -f "$C_COUNTER_FILE" ] && counter=$(cat "$C_COUNTER_FILE" 2>/dev/null)
-        counter=$((counter + 1))
-        echo "$counter" > "$C_COUNTER_FILE"
+        # 시간 기반 간격: 마지막 c-bubble 이후 20초 이상이면 트리거
+        now_epoch=$(date '+%s')
+        last_bubble_epoch=0
+        [ -f "$C_BUBBLE_LAST_FILE" ] && last_bubble_epoch=$(cat "$C_BUBBLE_LAST_FILE" 2>/dev/null)
+        [ -z "$last_bubble_epoch" ] && last_bubble_epoch=0
 
-        if [ $((counter % 3)) -eq 0 ]; then
+        if [ $((now_epoch - last_bubble_epoch)) -ge $C_BUBBLE_INTERVAL ]; then
             c_name=$(get_cteam_char "$tool_name")
             c_role="c-$(echo "$tool_name" | tr 'A-Z' 'a-z')"
             # 캐릭터별 성격 (i18n에서 로드)
             c_desc=$(jq -r --arg n "$c_name" '.c_team[$n] // .c_team._default // "IT startup team member"' "$_I18N" 2>/dev/null)
 
             # Python으로 실제 데이터 추출 → dialogue-generator AI에 전달할 요약
-            # Load python labels from i18n
-            data_summary=$(echo "$input" | _PY_LABELS="$(cat "$_I18N" 2>/dev/null)" python3 -c '
-import json, sys, os, re
-
-try:
-    data = json.load(sys.stdin)
-except:
-    sys.exit(1)
-
-# Load i18n labels
-i18n_raw = os.environ.get("_PY_LABELS", "{}")
-try:
-    i18n = json.loads(i18n_raw).get("python_labels", {})
-except:
-    i18n = {}
-
-L = lambda k, d="": i18n.get(k, d)
-
-tool = data.get("tool_name", "")
-ti = data.get("tool_input", {})
-tr = data.get("tool_response", {})
-
-def get_text(r):
-    if isinstance(r, str): return r
-    if isinstance(r, dict):
-        c = r.get("content", [])
-        if isinstance(c, list) and len(c) > 0:
-            if isinstance(c[0], dict): return c[0].get("text", "")
-            return str(c[0])
-        if isinstance(c, str): return c
-    return ""
-
-resp = get_text(tr)
-info = []
-
-if tool == "Read":
-    fp = ti.get("file_path", "")
-    fn = os.path.basename(fp)
-    ext = os.path.splitext(fn)[1]
-    lines = resp.split("\n") if resp else []
-    lc = len(lines)
-    imports = sum(1 for l in lines if "import " in l[:40] or "require(" in l)
-    funcs = sum(1 for l in lines if re.match(r".*\b(function |class |def |export (function|class|const) )", l))
-    comments = sum(1 for l in lines if l.strip().startswith(("//", "#", "/*", "*")))
-    info.append(f"{L('file','File')}: {fn}")
-    info.append(f"{lc}{L('lines','lines')}")
-    if imports: info.append(f"{L('imports','imports')} {imports}{L('imports_suffix','')}")
-    if funcs: info.append(f"{L('funcs','funcs/classes')} {funcs}{L('funcs_suffix','')}")
-    if comments == 0 and lc > 50: info.append(L("no_comments","no comments"))
-    if ext: info.append(f"{L('type','type')}: {ext}")
-
-elif tool == "Edit":
-    fp = ti.get("file_path", "")
-    fn = os.path.basename(fp)
-    old = ti.get("old_string", "")
-    new = ti.get("new_string", "")
-    ol = old.count("\n") + (1 if old.strip() else 0)
-    nl = new.count("\n") + (1 if new.strip() else 0)
-    info.append(f"{L('file','File')}: {fn}")
-    info.append(f"-{ol}{L('minus_lines','lines')} +{nl}{L('plus_lines','lines')}")
-    d = abs(len(new) - len(old))
-    if d < 5: info.append(L("fine_tuning","fine tuning"))
-    elif d > 500: info.append(L("large_edit","large edit"))
-    for l in new.split("\n"):
-        m = re.match(r"\s*(?:function |export (?:function|const|class) |def )(\w+)", l)
-        if m:
-            info.append(f"{L('function','func')}: {m.group(1)}")
-            break
-
-elif tool == "Grep":
-    pat = ti.get("pattern", "")[:30]
-    lines = [l for l in resp.split("\n") if l.strip()] if resp else []
-    mc = len(lines)
-    files = set()
-    for l in lines:
-        if ":" in l: files.add(l.split(":")[0])
-    info.append(f"{L('pattern','pattern')}: {pat}")
-    info.append(f"{mc}{L('matches','matches')}")
-    if files: info.append(f"{len(files)}{L('files_suffix','files')}")
-
-elif tool == "Glob":
-    pat = ti.get("pattern", "")[:30]
-    lines = [l for l in resp.split("\n") if l.strip()] if resp else []
-    fc = len(lines)
-    info.append(f"{L('pattern','pattern')}: {pat}")
-    info.append(f"{fc}{L('files_suffix','files')}")
-
-elif tool == "Write":
-    fp = ti.get("file_path", "")
-    fn = os.path.basename(fp)
-    content = ti.get("content", "")
-    lc = content.count("\n") + (1 if content.strip() else 0)
-    ext = os.path.splitext(fn)[1]
-    info.append(f"{L('file','File')}: {fn}")
-    info.append(f"{lc}{L('lines','lines')}")
-    if ext: info.append(f"{L('type','type')}: {ext}")
-
-elif tool == "Bash":
-    cmd = ti.get("command", "")[:60]
-    last_lines = resp.split("\n")[-5:] if resp else []
-    info.append(f"{L('command','cmd')}: {cmd}")
-    if "error" in resp[:500].lower(): info.append(L("error_occurred","error occurred"))
-    elif "success" in resp[:500].lower(): info.append(L("success","success"))
-    elif any("pass" in l.lower() for l in last_lines): info.append(L("test_passed","tests passed"))
-    elif any("fail" in l.lower() for l in last_lines): info.append(L("failed","failed"))
-
-print(", ".join(info) if info else "")
-' 2>/dev/null)
+            # 별도 .py 파일 사용 (bash 작은따옴표 충돌 방지)
+            EXTRACT_PY="${CLAUDE_PLUGIN_ROOT:-$PLUGIN_DIR}/hooks/extract-data.py"
+            [ ! -f "$EXTRACT_PY" ] && EXTRACT_PY="$PLUGIN_DIR/extract-data.py"
+            data_summary=$(echo "$input" | _PY_LABELS="$(cat "$_I18N" 2>/dev/null)" python3 "$EXTRACT_PY" 2>/dev/null)
 
             if [ -n "$data_summary" ]; then
                 # 큐에 C-team 대화 생성 요청 기록 (server.ts가 소비)
                 mkdir -p "$(dirname "$DIALOGUE_QUEUE_FILE")"
-                _ctpl=$(jq -r '.dialogue_prompt.c_bubble_template // "IT startup ${speaker}(${desc}) reacts: ${data}. 15-30 chars. JSON only: {\"lines\":[{\"speaker\":\"${speaker}\",\"msg\":\"line\"}]}"' "$_I18N" 2>/dev/null)
+                _ctpl=$(jq -r '.dialogue_prompt.c_bubble_template // "IT startup. ${speaker}(${desc}) working on: ${data}. Short chat with Chris(boss). Dev humor required, mention specific work, each speaks 1-2 times, 20-50 chars/line. JSON only: {\"lines\":[{\"speaker\":\"boss\",\"msg\":\"..\"},{\"speaker\":\"${speaker}\",\"msg\":\"..\"}]}"' "$_I18N" 2>/dev/null)
                 _cprompt=$(echo "$_ctpl" | sed "s/\${speaker}/$c_name/g; s/\${desc}/$c_desc/g; s|\${data}|$data_summary|g")
                 jq -nc --arg ep "$(date +%s)" --arg speaker "$c_name" --arg role "$c_role" --arg data "$data_summary" --arg desc "$c_desc" --arg dtype "c-bubble" --arg prompt "$_cprompt" \
                     '{epoch:($ep|tonumber),speaker:$speaker,role:$role,type:$dtype,prompt:$prompt}' >> "$DIALOGUE_QUEUE_FILE"
+                echo "$now_epoch" > "$C_BUBBLE_LAST_FILE"
             fi
         fi
         ;;

@@ -1041,6 +1041,28 @@ export class Renderer {
   _drawPaperStack(ctx, f) {
     const px = f.x * TS, py = f.y * TS;
     const pw = f.w * TS, ph = f.h * TS;
+
+    // ── Clickable glow effect ──
+    const hm = this._hoverMouse;
+    const isHover = hm && hm.x >= px && hm.x <= px + pw && hm.y >= py && hm.y <= py + ph;
+    const pulse = 0.5 + 0.5 * Math.sin(this.tick * 0.07);
+    const baseAlpha = isHover ? 0.4 : 0.18;
+    const glowAlpha = baseAlpha * pulse + (isHover ? 0.12 : 0);
+    // Soft glow behind the note
+    const gcx = px + pw / 2, gcy = py + ph / 2;
+    const grd = ctx.createRadialGradient(gcx, gcy, 2, gcx, gcy, pw * 1.1);
+    grd.addColorStop(0, `rgba(255,200,100,${glowAlpha * 1.0})`);
+    grd.addColorStop(0.6, `rgba(255,180,60,${glowAlpha * 0.4})`);
+    grd.addColorStop(1, 'rgba(255,180,60,0)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(px - 8, py - 6, pw + 16, ph + 12);
+    // Corner sparkles
+    const corners = [[px - 1, py - 1], [px + pw, py - 1], [px - 1, py + ph], [px + pw, py + ph]];
+    for (let i = 0; i < corners.length; i++) {
+      const sparkAlpha = (0.25 + 0.3 * Math.sin(this.tick * 0.09 + i * 1.6)) * (isHover ? 2 : 1);
+      ctx.fillStyle = `rgba(255,220,130,${Math.min(sparkAlpha, 0.85)})`;
+      ctx.fillRect(corners[i][0], corners[i][1], 2, 2);
+    }
     // 펼쳐진 두꺼운 노트 (38×26px, 3/4 등각 뷰)
     // 페이지 굴곡을 gradient로 표현: spine 근처 어둡고 바깥 밝게 = 페이지가 위로 들린 느낌
     const bw = pw - 2, bh = ph - 2;
@@ -1183,6 +1205,35 @@ export class Renderer {
     if (!char.sprite) return;
     const frame = char.getFrameRect();
     if (!frame) return;
+
+    // ── Clickable glow effect (Chris only) ──
+    if (char.name === 'Chris') {
+      const hm = this._hoverMouse;
+      const isHover = hm && hm.x >= char.x - 20 && hm.x <= char.x + 20 && hm.y >= char.y - 32 && hm.y <= char.y + 8;
+      const pulse = 0.4 + 0.3 * Math.sin(this.tick * 0.06);
+      const baseAlpha = isHover ? 0.35 : 0.15;
+      const glowAlpha = baseAlpha * pulse + (isHover ? 0.15 : 0);
+      // Outer soft glow
+      const grd = ctx.createRadialGradient(char.x, char.y, 4, char.x, char.y, 32);
+      grd.addColorStop(0, `rgba(96,165,250,${glowAlpha * 1.2})`);
+      grd.addColorStop(0.5, `rgba(96,165,250,${glowAlpha * 0.5})`);
+      grd.addColorStop(1, 'rgba(96,165,250,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.ellipse(char.x, char.y, 32, 28, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Diamond sparkle particles (rotating)
+      const sparkCount = 4;
+      for (let i = 0; i < sparkCount; i++) {
+        const angle = (this.tick * 0.02) + (i * Math.PI * 2 / sparkCount);
+        const radius = 22 + 3 * Math.sin(this.tick * 0.05 + i);
+        const sx = char.x + Math.cos(angle) * radius;
+        const sy = char.y - 4 + Math.sin(angle) * radius * 0.7;
+        const sparkAlpha = (0.3 + 0.3 * Math.sin(this.tick * 0.1 + i * 1.5)) * (isHover ? 1.8 : 1);
+        ctx.fillStyle = `rgba(147,197,253,${Math.min(sparkAlpha, 0.9)})`;
+        ctx.fillRect(sx - 1, sy - 1, 2, 2);
+      }
+    }
 
     if (isPlayer) {
       ctx.fillStyle = 'rgba(255,255,255,0.08)';
@@ -1374,17 +1425,17 @@ export class Renderer {
       }
     }
 
-    // 5. Bubbles
+    // 5. UI
+    this._drawUI(ctx, characters);
+
+    // 6. Room labels
+    this._drawRoomLabels(ctx);
+
+    // 7. Bubbles (always on top of everything)
     bubbleManager.render(ctx, characters.characters);
     if (player) {
       bubbleManager.render(ctx, new Map([['Player', player]]));
     }
-
-    // 6. UI
-    this._drawUI(ctx, characters);
-
-    // 7. Room labels
-    this._drawRoomLabels(ctx);
   }
 
   // ═══════════════════════════════════════════════════════════════

@@ -8,6 +8,7 @@ PLUGIN_DIR="$HOME/.claude/plugins/backstage"
 ACTIVE_AGENT_FILE="$PLUGIN_DIR/active-agent.json"
 HISTORY_FILE="$PLUGIN_DIR/history.jsonl"
 LAST_TOOL_FILE="$PLUGIN_DIR/last-chris-tool.txt"
+DIALOGUE_QUEUE_FILE="$PLUGIN_DIR/dialogue-queue.jsonl"
 
 # i18n loading
 _LANG=$(cat "$PLUGIN_DIR/config.json" 2>/dev/null | jq -r '.language // "en"')
@@ -94,7 +95,7 @@ if [ "$tool_name" = "TaskCreate" ]; then
         '{ts:$ts,epoch:($ep|tonumber),type:"task-create",speaker:"Board",role:"system",msg:"",data:{subject:$subj,description:$desc,status:"pending"}}' >> "$HISTORY_FILE"
 fi
 
-if [ "$tool_name" = "Task" ]; then
+if [ "$tool_name" = "Task" ] || [ "$tool_name" = "Agent" ]; then
     agent_type=$(echo "$input" | jq -r '.tool_input.subagent_type // "unknown"')
     description=$(echo "$input" | jq -r '.tool_input.description // ""')
 
@@ -120,6 +121,15 @@ if [ "$tool_name" = "Task" ]; then
         mkdir -p "$(dirname "$ACTIVE_AGENT_FILE")"
         jq -nc --arg type "$agent_type" --arg name "$agent_name" --arg desc "$description" \
             '{type:$type, name:$name, description:$desc, start_time:'$(date +%s)'}' > "$ACTIVE_AGENT_FILE"
+
+        # 에이전트 시작 시 AI 대화 생성 요청 (사무실 분위기 대화)
+        # 캐릭터별 성격 (i18n에서 로드)
+        c_desc=$(jq -r --arg n "$agent_name" '.c_team[$n] // .characters[$n] // "IT team member"' "$_I18N" 2>/dev/null)
+        _atpl=$(jq -r '.dialogue_prompt.assign_template // "IT startup office. Chris(boss,witty+blunt) assigns to ${speaker}(${desc}): \"${task}\". Rules: mention specific task content, dev humor required, no generic phrases, each speaks 2-3 times, 30-50 chars/line. JSON only: {\"lines\":[{\"speaker\":\"boss\",\"msg\":\"..\"},{\"speaker\":\"agent\",\"msg\":\"..\"}]}"' "$_I18N" 2>/dev/null)
+        _aprompt=$(echo "$_atpl" | sed "s/\${speaker}/$agent_name/g; s/\${desc}/$c_desc/g; s|\${task}|$description|g")
+        mkdir -p "$(dirname "$DIALOGUE_QUEUE_FILE")"
+        jq -nc --arg ep "$(date +%s)" --arg speaker "$agent_name" --arg role "$agent_type" --arg dtype "assign" --arg prompt "$_aprompt" \
+            '{epoch:($ep|tonumber),speaker:$speaker,role:$role,type:$dtype,prompt:$prompt}' >> "$DIALOGUE_QUEUE_FILE"
     fi
 fi
 

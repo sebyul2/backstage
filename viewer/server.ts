@@ -2,6 +2,10 @@ import { homedir } from "os";
 import * as path from "path";
 import * as fs from "fs";
 
+// claude --print 중첩 세션 방지: 서버 프로세스 레벨에서 환경변수 제거
+delete process.env.CLAUDECODE;
+delete process.env.CLAUDE_CODE_ENTRYPOINT;
+
 // ─── Config & i18n ──────────────────────────────────────────────
 const CONFIG_PATH = path.join(process.env.HOME || '', '.claude/plugins/backstage/config.json');
 let config: { language: string; ai_dialogue: boolean } = { language: 'en', ai_dialogue: true };
@@ -321,7 +325,7 @@ try { fs.unlinkSync(path.join(PLUGIN_DIR, 'active-agent.json')); } catch {}
 try {
   if (fs.existsSync(HISTORY_FILE)) {
     const lines = fs.readFileSync(HISTORY_FILE, 'utf-8').split('\n').filter(l => l.trim());
-    const persistTypes = new Set(['done', 'task-create', 'task-update', 'request', 'assign']);
+    const persistTypes = new Set(['done', 'request', 'assign']);
     const cleaned = lines.filter(line => {
       try { return persistTypes.has(JSON.parse(line).type); } catch { return false; }
     });
@@ -696,28 +700,35 @@ function scanTranscriptForAgentWork(): void {
       }
       // dialogue-generator는 건너뛰기 (대사 생성 에이전트이므로 완료 보고 불필요)
       if (info.agentType.includes('dialogue-generator')) continue;
-      // 완료 대사: history에서 해당 에이전트의 최근 이벤트를 읽어 맥락 반영
-      let doneMsg = "작업 완료";
-      try {
-        if (fs.existsSync(HISTORY_FILE)) {
-          const lines = fs.readFileSync(HISTORY_FILE, 'utf-8').trim().split('\n').reverse();
-          const recentWork: string[] = [];
-          for (const line of lines) {
-            if (recentWork.length >= 3) break;
-            try {
-              const ev = JSON.parse(line);
-              if (ev.speaker === name && ev.type === 'c-bubble' && ev.msg) {
-                recentWork.push(ev.msg);
-              }
-            } catch {}
+
+      // AI 대화 ON이면 완료 대사 없이 조용히 done (대사는 assign 시점에만)
+      if (config.ai_dialogue) {
+        const entry = JSON.stringify({ ts, epoch, type: "done", speaker: name, role: info.agentType, msg: "" });
+        try { fs.appendFileSync(HISTORY_FILE, entry + "\n"); } catch {}
+      } else {
+        // AI 대화 OFF: 기존 fallback 완료 대사 유지
+        let doneMsg = "작업 완료";
+        try {
+          if (fs.existsSync(HISTORY_FILE)) {
+            const lines = fs.readFileSync(HISTORY_FILE, 'utf-8').trim().split('\n').reverse();
+            const recentWork: string[] = [];
+            for (const line of lines) {
+              if (recentWork.length >= 3) break;
+              try {
+                const ev = JSON.parse(line);
+                if (ev.speaker === name && ev.type === 'c-bubble' && ev.msg) {
+                  recentWork.push(ev.msg);
+                }
+              } catch {}
+            }
+            if (recentWork.length > 0) {
+              doneMsg = recentWork[0].replace(/[.!？！~]+$/, '') + ' — 완료!';
+            }
           }
-          if (recentWork.length > 0) {
-            doneMsg = recentWork[0].replace(/[.!？！~]+$/, '') + ' — 완료!';
-          }
-        }
-      } catch {}
-      const entry = JSON.stringify({ ts, epoch, type: "done", speaker: name, role: info.agentType, msg: doneMsg });
-      try { fs.appendFileSync(HISTORY_FILE, entry + "\n"); } catch {}
+        } catch {}
+        const entry = JSON.stringify({ ts, epoch, type: "done", speaker: name, role: info.agentType, msg: doneMsg });
+        try { fs.appendFileSync(HISTORY_FILE, entry + "\n"); } catch {}
+      }
     }
   }
 
@@ -953,9 +964,11 @@ function scanTranscriptForAgentWork(): void {
   let chapterNewCount = 0;
 
   // Hook 대사 필터 (IT스타트업 대사가 userMsg로 오염되는 문제 방지)
+  // + 시스템 자동 메시지 필터 (Tool loaded 등 Claude Code 내부 메시지)
   const isHookDialogue = (t: string) =>
     t.includes('IT스타트업') || t.includes('한마디:') || t.startsWith('👤') ||
-    t.includes('dialogue-generator') || t.includes('JSON만');
+    t.includes('dialogue-generator') || t.includes('JSON만') ||
+    /^Tool(s)? (loaded|not found|found)/.test(t) || t === 'No tools';
 
   // 전처리: 같은 msgId의 streaming 분할 entry를 하나로 합치기
   const mergedEntries: { userMsg?: string; msgId: string; content: any[] }[] = [];
@@ -1497,7 +1510,7 @@ async function handleMessage(req: Request): Promise<Response> {
 async function handleRoot(): Promise<Response> {
   try {
     let html = fs.readFileSync(HTML_FILE, "utf-8");
-    html = html.replace(/v2\.\d+(\.\d+)?/g, `v${PLUGIN_VERSION}`);
+    html = html.replace(/v\d+\.\d+(\.\d+)?/g, `v${PLUGIN_VERSION}`);
     return new Response(html, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
@@ -1648,53 +1661,131 @@ const server = Bun.serve({
           recentEvents,
         }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
       }
+      case "/c-team-info": {
+        const cName = url.searchParams.get('name');
+        if (!cName) return new Response('{}', { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+
+        // history.jsonl에서 이 C-Team 캐릭터의 최근 work-done 이벤트 추출
+        const cEvents: any[] = [];
+        try {
+          const content = fs.readFileSync(HISTORY_FILE, 'utf-8');
+          const lines = content.trim().split('\n');
+          for (let i = lines.length - 1; i >= 0 && cEvents.length < 20; i--) {
+            try {
+              const e = JSON.parse(lines[i]);
+              if (e.speaker === cName && (e.type === 'work-done' || e.type === 'c-bubble')) cEvents.unshift(e);
+            } catch {}
+          }
+        } catch {}
+
+        return new Response(JSON.stringify({
+          name: cName,
+          events: cEvents,
+        }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+      }
       case "/refresh": {
         try {
-          // history에서 state 이벤트 + done/assign 보존, 나머지 삭제
-          const preserveTypes = new Set(['task-create', 'task-update', 'usage-update', 'done', 'assign']);
+          // refresh: TODO/DOING 태스크만 transcript 기준으로 갱신, 나머지 일체 건드리지 않음
           if (fs.existsSync(HISTORY_FILE)) {
             const raw = fs.readFileSync(HISTORY_FILE, 'utf-8');
             const lines = raw.trim().split('\n');
-            // done 이벤트를 done-archive.jsonl에 반영구 보관
-            const doneArchive = path.join(PLUGIN_DIR, 'done-archive.jsonl');
-            const doneLines = lines.filter(line => {
-              try { return JSON.parse(line).type === 'done'; } catch { return false; }
-            });
-            if (doneLines.length > 0) {
-              fs.appendFileSync(doneArchive, doneLines.join('\n') + '\n');
-            }
-            // completed된 task ID 수집 (해당 task-create도 보존하기 위해)
+
+            // 1) history에서 기존 pending/in_progress 태스크 이벤트만 제거
             const completedTaskIds = new Set<string>();
+            const pendingTaskIds = new Set<string>();
             for (const line of lines) {
               try {
                 const e = JSON.parse(line);
-                if (e.type === 'task-update' && e.data?.status === 'completed' && e.data?.id) {
-                  completedTaskIds.add(e.data.id);
+                if (e.type === 'task-update' && e.data?.id) {
+                  if (e.data.status === 'completed') {
+                    completedTaskIds.add(e.data.id);
+                    pendingTaskIds.delete(e.data.id);
+                  } else if (e.data.status === 'pending' || e.data.status === 'in_progress') {
+                    if (!completedTaskIds.has(e.data.id)) pendingTaskIds.add(e.data.id);
+                  }
+                }
+                if (e.type === 'task-create' && e.data?.id && !completedTaskIds.has(e.data.id)) {
+                  pendingTaskIds.add(e.data.id);
                 }
               } catch {}
             }
 
-            // state + done + assign 보존 (completed task의 create+update 쌍 유지)
             const preserved = lines.filter(line => {
               try {
                 const e = JSON.parse(line);
-                if (!preserveTypes.has(e.type)) return false;
-                // task-create: completed된 task의 것만 보존
-                if (e.type === 'task-create') return completedTaskIds.has(e.data?.id);
-                // task-update: completed만 보존
-                if (e.type === 'task-update') return e.data?.status === 'completed';
+                if (e.type === 'task-create' && pendingTaskIds.has(e.data?.id)) return false;
+                if (e.type === 'task-update' && pendingTaskIds.has(e.data?.id)) return false;
                 return true;
-              } catch { return false; }
-            }).join('\n');
-            fs.writeFileSync(HISTORY_FILE, preserved ? preserved + '\n' : '');
+              } catch { return true; } // 파싱 실패한 라인은 보존
+            });
+
+            // 2) transcript에서 현재 실제 태스크 상태를 파싱하여 복원
+            const newTaskEvents: string[] = [];
+            if (transcriptPath && fs.existsSync(transcriptPath)) {
+              const txContent = fs.readFileSync(transcriptPath, 'utf-8');
+              const txLines = txContent.trim().split('\n');
+
+              // TaskCreate tool_use → tool_result 매칭으로 태스크 복원
+              const taskCreateInputs: Map<string, { subject: string; description: string }> = new Map();
+              const tasks: Map<string, { id: string; subject: string; description: string; status: string }> = new Map();
+
+              for (const tl of txLines) {
+                try {
+                  const entry = JSON.parse(tl);
+                  if (!entry.message?.content) continue;
+                  for (const c of entry.message.content) {
+                    // TaskCreate tool_use
+                    if (c.type === 'tool_use' && c.name === 'TaskCreate' && c.input) {
+                      taskCreateInputs.set(c.id, {
+                        subject: c.input.subject || '',
+                        description: c.input.description || '',
+                      });
+                    }
+                    // TaskCreate tool_result → ID 추출
+                    if (c.type === 'tool_result' && taskCreateInputs.has(c.tool_use_id)) {
+                      const text = typeof c.content === 'string' ? c.content : c.content?.[0]?.text || '';
+                      const idMatch = text.match(/#(\d+)/);
+                      if (idMatch) {
+                        const info = taskCreateInputs.get(c.tool_use_id)!;
+                        tasks.set(idMatch[1], { id: idMatch[1], ...info, status: 'pending' });
+                      }
+                      taskCreateInputs.delete(c.tool_use_id);
+                    }
+                    // TaskUpdate tool_use → 상태 업데이트
+                    if (c.type === 'tool_use' && c.name === 'TaskUpdate' && c.input?.taskId) {
+                      const t = tasks.get(c.input.taskId);
+                      if (t && c.input.status) {
+                        t.status = c.input.status;
+                      }
+                    }
+                  }
+                } catch {}
+              }
+
+              // completed가 아닌(pending/in_progress) 태스크만 history에 새로 기록
+              const ts = new Date().toTimeString().slice(0, 8);
+              const epoch = Math.floor(Date.now() / 1000);
+              for (const [, t] of tasks) {
+                if (t.status === 'completed' || t.status === 'deleted') continue;
+                // 이미 completed로 history에 있는 태스크는 스킵
+                if (completedTaskIds.has(t.id)) continue;
+                newTaskEvents.push(JSON.stringify({
+                  ts, epoch, type: 'task-create', speaker: 'Board', role: 'system', msg: '',
+                  data: { id: t.id, subject: t.subject, description: t.description, status: 'pending' },
+                }));
+                if (t.status !== 'pending') {
+                  newTaskEvents.push(JSON.stringify({
+                    ts, epoch, type: 'task-update', speaker: 'Board', role: 'system', msg: '',
+                    data: { id: t.id, status: t.status, subject: t.subject },
+                  }));
+                }
+              }
+            }
+
+            // 3) 보존된 이벤트 + 복원된 태스크 이벤트로 history 갱신
+            const allLines = [...preserved, ...newTaskEvents];
+            fs.writeFileSync(HISTORY_FILE, allLines.length > 0 ? allLines.join('\n') + '\n' : '');
           }
-          // chris-log는 refresh해도 유지 (작업 이력은 보존)
-          // recordedTextHashes 유지 → chris-log 중복 방지
-          // transcript 전체 재스캔 → 현재 활성 task + agent work 복원
-          transcriptOffset = 0;
-          recordedToolIds.clear();
-          subagentOffsets.clear();
-          scanTranscriptForAgentWork();
           return new Response(JSON.stringify({ ok: true }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
         } catch {
           return new Response(JSON.stringify({ ok: false }), { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
@@ -1882,6 +1973,7 @@ async function processDialogueQueue(): Promise<void> {
   } catch { return; }
 
   dialogueQueueProcessing = true;
+  console.log(`[dialogue] processing queue: ${size} bytes`);
 
   try {
     // 큐 즉시 비우기 (새 요청은 다음 사이클에 처리)
@@ -1894,8 +1986,8 @@ async function processDialogueQueue(): Promise<void> {
       let entry: any;
       try { entry = JSON.parse(line); } catch { continue; }
 
-      // TTL 체크: 30초 이상 된 요청은 스킵
-      if (now - (entry.epoch || 0) > 30) continue;
+      // TTL 체크: 60초 이상 된 요청은 스킵
+      if (now - (entry.epoch || 0) > 60) { console.log(`[dialogue] TTL skip: age=${now - (entry.epoch || 0)}s speaker=${entry.speaker}`); continue; }
 
       const prompt = entry.prompt;
       if (!prompt) continue;
@@ -1907,17 +1999,22 @@ async function processDialogueQueue(): Promise<void> {
       const fullPrompt = langPrefix + prompt;
 
       try {
-        // claude --print (CLAUDECODE 제거로 중첩 방지 우회)
+        // claude -p (중첩 세션 감지 환경변수 모두 제거)
+        // stdin 파이프로 프롬프트 전달 (인자 방식은 MCP 초기화 대기로 hang됨)
         const cleanEnv = { ...process.env, BACKSTAGE_DIALOGUE: '1' };
         delete cleanEnv.CLAUDECODE;
+        delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
+        delete cleanEnv.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
 
         // BACKSTAGE_DIALOGUE=1 환경변수로 hook 재귀 방지 (user-prompt-hook.sh에서 체크)
-        const proc = Bun.spawn(['claude', '--print', '--model', 'haiku', fullPrompt], {
+        // stdin으로 프롬프트 전달: Blob을 사용해 Bun이 자동으로 파이프+닫기 처리
+        const proc = Bun.spawn(['claude', '-p', '--model', 'haiku', '--no-session-persistence'], {
+          stdin: new Blob([fullPrompt]),
           stdout: 'pipe',
           stderr: 'pipe',
           env: cleanEnv,
         });
-        const killTimer = setTimeout(() => { try { proc.kill(); } catch {} }, 15_000);
+        const killTimer = setTimeout(() => { try { proc.kill(); } catch {} }, 30_000);
 
         const output = await new Response(proc.stdout).text();
         const stderr = await new Response(proc.stderr).text();
@@ -1944,19 +2041,38 @@ async function processDialogueQueue(): Promise<void> {
         const epoch = Math.floor(Date.now() / 1000);
 
         ensureHistoryFile();
-        for (let i = 0; i < json.lines.length; i++) {
-          const l = json.lines[i];
-          if (!l.msg) continue;
-          const speaker = l.speaker || entry.speaker || 'Agent';
-          const evType = entry.type === 'complete' ? 'done' : 'c-bubble';
-          const histEntry = JSON.stringify({
-            ts, epoch: epoch + i, type: evType,
-            speaker, role: entry.role || 'agent', msg: l.msg,
-          });
-          try { fs.appendFileSync(HISTORY_FILE, histEntry + '\n'); } catch {}
+        // 시간차 대화: 첫 라인은 즉시, 나머지는 2초 간격으로 기록
+        // → SSE 폴링에서 자연스럽게 순차 표시됨
+        const validLines = json.lines.filter((l: any) => l.msg);
+        for (let i = 0; i < validLines.length; i++) {
+          const l = validLines[i];
+          const rawSpeaker = l.speaker || entry.speaker || 'Agent';
+          const speaker = rawSpeaker === 'boss' ? 'Chris'
+            : rawSpeaker === 'agent' ? (entry.speaker || 'Agent')
+            : rawSpeaker;
+          const role = rawSpeaker === 'boss' ? 'boss' : (entry.role || 'agent');
+          const evType = entry.type === 'complete' ? 'done'
+            : entry.type === 'assign' ? 'assign'
+            : 'c-bubble';
+
+          const writeEntry = () => {
+            const nowTs = new Date().toTimeString().slice(0, 8);
+            const nowEpoch = Math.floor(Date.now() / 1000);
+            const histEntry = JSON.stringify({
+              ts: nowTs, epoch: nowEpoch, type: evType,
+              speaker, role, msg: l.msg,
+            });
+            try { fs.appendFileSync(HISTORY_FILE, histEntry + '\n'); } catch {}
+          };
+
+          if (i === 0) {
+            writeEntry();
+          } else {
+            setTimeout(writeEntry, i * 2000);
+          }
         }
-      } catch {
-        // claude --print 실패 시 조용히 스킵
+      } catch (e: any) {
+        console.error('[dialogue] claude --print error:', e?.message || e);
       }
     }
   } finally {
@@ -1966,7 +2082,7 @@ async function processDialogueQueue(): Promise<void> {
 
 // ─── Timers ──────────────────────────────────────────────────────
 
-// Transcript scanner: every 2 seconds (thinking 캡처를 위해 빈도 증가)
+// Transcript scanner: every 1 second (thinking redact 전 캡처 + 리소스 절충)
 const transcriptScanTimer = setInterval(() => {
   try { scanTranscriptForAgentWork(); } catch {}
   // Usage API 주기적 갱신 (fire-and-forget, 자체 60초 캐시)
@@ -1974,7 +2090,7 @@ const transcriptScanTimer = setInterval(() => {
     usageData.fiveHourPercent = u.fiveHour;
     usageData.sevenDayPercent = u.sevenDay;
   }).catch(() => {});
-}, 2000);
+}, 1000);
 
 // Usage refresh: re-scan transcript every 30 seconds for accurate token data
 const usageRefreshTimer = setInterval(() => {
