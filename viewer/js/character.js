@@ -3,7 +3,7 @@
 
 import { TILE_SIZE, deskPositions, breakPositions, breakWanderZones, furnitureInteractions, MAP_W, MAP_H } from './map.js?v=2.5';
 import { findPath, pixelToTile, tileToPixel } from './pathfinding.js?v=2.5';
-import { generateSpriteSheet } from './sprite-generator.js?v=2.5';
+import { generateSpriteSheet } from './sprite-generator.js?v=2.7';
 
 // States
 const S = {
@@ -28,7 +28,6 @@ const IDLE_MAX = 10000;
 const ARRIVE_DIST = 6;
 const DOOR_X = 19 * TILE_SIZE;
 const DOOR_Y = 7.5 * TILE_SIZE;
-
 // Tool categories for visual display
 export const TOOL_ICONS = {
   'Read':  { icon: '📖', label: 'READ',  color: '#29ADFF' },
@@ -550,9 +549,9 @@ export class Character {
 
     if (this.state === S.IDLE || this.state === S.IDLE_BREAK || this.state === S.TALKING || this.state === S.INTERACTING) {
       if (this._isCTeam) {
-        row = this.deskDir ?? 0; // C-team faces desk direction even when idle
+        row = this.deskDir ?? 0; // C-team faces desk direction (walk row)
       } else {
-        row = this.dir; // face last movement direction
+        row = this.dir; // face last walk direction
       }
       col = this.frame % 2;
     } else if (this.state === S.WORKING) {

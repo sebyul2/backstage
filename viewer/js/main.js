@@ -1455,10 +1455,8 @@ async function showChrisLogPopup() {
       });
 
       const groupTitle = document.createElement('span');
-      const fullMsg = grp.userMsg.length > 100 ? grp.userMsg.slice(0, 100) + '…' : grp.userMsg;
-      groupTitle.textContent = '👤 ' + grp.userMsg;
-      groupTitle._fullMsg = fullMsg;
-      groupTitle._shortMsg = grp.userMsg;
+      const shortMsg = grp.userMsg.split('\n')[0].slice(0, 80);
+      groupTitle.textContent = '👤 ' + shortMsg;
       Object.assign(groupTitle.style, {
         color: '#FFF1E8', fontSize: '12px', fontWeight: 'bold',
         flex: '1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -1507,121 +1505,164 @@ async function showChrisLogPopup() {
           chapterEl.insertBefore(divider, chapterEl.firstChild);
         }
 
-        // 챕터 타이틀 제거 — userMsg 그룹 헤더로 충분
+        // 시간순 steps 렌더링 (카테고리 헤더 + 전체 더보기)
+        const stepsArr = ch.steps || [];
 
-        // 💭 Thinking 섹션
-        if (ch.thinks && ch.thinks.length > 0) {
-          const thinkHeader = document.createElement('div');
-          thinkHeader.textContent = '💭 Thinking';
-          Object.assign(thinkHeader.style, {
-            color: '#FFEC27', fontSize: '10px', fontWeight: 'bold',
-            marginBottom: '4px', marginTop: idx === 0 ? '0' : '8px',
-          });
-          chapterEl.appendChild(thinkHeader);
+        // 레거시 호환: steps가 없으면 기존 필드에서 변환
+        if (stepsArr.length === 0) {
+          if (ch.thinks?.length) stepsArr.push({ type: 'think', lines: ch.thinks });
+          if (ch.response) stepsArr.push({ type: 'response', text: ch.response });
+          if (ch.tools?.length) ch.tools.forEach(t => stepsArr.push({ type: 'tool', ...t }));
+          if (ch.agents?.length) ch.agents.forEach(a => stepsArr.push({ type: 'agent', ...a }));
+        }
 
-          for (const t of ch.thinks) {
-            const thinkLine = document.createElement('div');
-            thinkLine.textContent = t;
-            Object.assign(thinkLine.style, {
-              color: '#C2C3C7', fontSize: '10px', lineHeight: '1.5',
-              paddingLeft: '8px', borderLeft: '2px solid #FFEC27',
-              marginBottom: '3px',
+        // step 요소들을 먼저 생성
+        const stepElements = [];
+        const INITIAL_VISIBLE = 5; // 처음 보이는 step 수
+
+        for (const step of stepsArr) {
+          // 💭 Think step
+          if (step.type === 'think' && step.lines?.length) {
+            const wrap = document.createElement('div');
+            Object.assign(wrap.style, { marginTop: '6px' });
+
+            const header = document.createElement('div');
+            header.textContent = '💭 Thinking';
+            Object.assign(header.style, {
+              color: '#FFEC27', fontSize: '10px', fontWeight: 'bold', marginBottom: '4px',
             });
-            chapterEl.appendChild(thinkLine);
+            wrap.appendChild(header);
+
+            for (const t of step.lines) {
+              const el = document.createElement('div');
+              el.textContent = t;
+              Object.assign(el.style, {
+                color: '#C2C3C7', fontSize: '10px', lineHeight: '1.5',
+                paddingLeft: '8px', borderLeft: '2px solid #FFEC27',
+                marginBottom: '3px', wordBreak: 'break-word',
+              });
+              wrap.appendChild(el);
+            }
+            stepElements.push(wrap);
+          }
+
+          // 💬 Response step
+          if (step.type === 'response' && step.text) {
+            const wrap = document.createElement('div');
+            Object.assign(wrap.style, { marginTop: '6px' });
+
+            const header = document.createElement('div');
+            header.textContent = '💬 Response';
+            Object.assign(header.style, {
+              color: '#00E436', fontSize: '10px', fontWeight: 'bold', marginBottom: '4px',
+            });
+            wrap.appendChild(header);
+
+            const respText = document.createElement('div');
+            respText.textContent = step.text;
+            Object.assign(respText.style, {
+              color: '#FFF1E8', fontSize: '11px', lineHeight: '1.5',
+              paddingLeft: '8px', borderLeft: '2px solid #00E436',
+              wordBreak: 'break-word',
+            });
+            wrap.appendChild(respText);
+            stepElements.push(wrap);
+          }
+
+          // 🔧 Tool step
+          if (step.type === 'tool') {
+            const toolIcon = { Read: '📖', Edit: '✏️', Write: '📝', Bash: '⚡', Grep: '🔍', Glob: '📂' }[step.name] || '🔧';
+            const toolEl = document.createElement('div');
+            Object.assign(toolEl.style, { marginTop: '3px' });
+
+            const headerEl = document.createElement('div');
+            headerEl.textContent = `${toolIcon} ${step.name}${step.detail ? ' → ' + step.detail : ''}`;
+            Object.assign(headerEl.style, {
+              color: '#AB5236', fontSize: '10px', lineHeight: '1.4',
+              cursor: step.change ? 'pointer' : 'default', userSelect: 'none',
+            });
+            toolEl.appendChild(headerEl);
+
+            if (step.change) {
+              const changeEl = document.createElement('div');
+              Object.assign(changeEl.style, {
+                maxHeight: '0', overflow: 'hidden', transition: 'max-height 0.2s ease',
+                paddingLeft: '12px', marginTop: '2px',
+              });
+              for (const cl of step.change.split('\n')) {
+                const lineEl = document.createElement('div');
+                lineEl.textContent = cl;
+                const isAdd = cl.startsWith('+');
+                const isDel = cl.startsWith('-');
+                Object.assign(lineEl.style, {
+                  color: isAdd ? '#00E436' : isDel ? '#FF004D' : '#8E8E8E',
+                  fontSize: '9px', fontFamily: '"Menlo", "Consolas", monospace',
+                  lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                });
+                changeEl.appendChild(lineEl);
+              }
+              headerEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                changeEl.style.maxHeight = changeEl.style.maxHeight === '0px' ? '300px' : '0px';
+              });
+              toolEl.appendChild(changeEl);
+            }
+            stepElements.push(toolEl);
+          }
+
+          // 🤖 Agent step
+          if (step.type === 'agent') {
+            const agentEl = document.createElement('div');
+            agentEl.textContent = `🤖 ${step.name}${step.desc ? ': ' + step.desc : ''}`;
+            Object.assign(agentEl.style, {
+              color: '#7E2553', fontSize: '10px', marginTop: '3px',
+            });
+            stepElements.push(agentEl);
+          }
+
+          // 사용자 추가 메시지 (상위 뎁스, 선명한 배경)
+          if (step.type === 'user-reply' && step.text) {
+            const replyEl = document.createElement('div');
+            replyEl.textContent = `👤 ${step.text}`;
+            Object.assign(replyEl.style, {
+              color: '#FFEC27', fontSize: '11px',
+              marginTop: '10px', marginBottom: '4px',
+              padding: '5px 8px',
+              background: 'rgba(255,236,39,0.15)',
+              borderLeft: '3px solid #FFEC27',
+              borderRadius: '2px',
+              fontWeight: 'bold',
+              lineHeight: '1.4',
+            });
+            stepElements.push(replyEl);
           }
         }
 
-        // 💬 Response 섹션
-        if (ch.response) {
-          const respHeader = document.createElement('div');
-          respHeader.textContent = '💬 Response';
-          Object.assign(respHeader.style, {
-            color: '#00E436', fontSize: '10px', fontWeight: 'bold',
-            marginBottom: '4px', marginTop: '8px',
+        // 전체 더보기: 처음 INITIAL_VISIBLE개만 표시, 나머지는 숨김
+        const hiddenEls = [];
+        stepElements.forEach((el, i) => {
+          if (i >= INITIAL_VISIBLE) {
+            el.style.display = 'none';
+            hiddenEls.push(el);
+          }
+          chapterEl.appendChild(el);
+        });
+
+        if (hiddenEls.length > 0) {
+          const moreBtn = document.createElement('div');
+          let expanded = false;
+          moreBtn.textContent = `▼ +${hiddenEls.length}개 더보기`;
+          Object.assign(moreBtn.style, {
+            color: '#29ADFF', fontSize: '10px', cursor: 'pointer',
+            marginTop: '6px', opacity: '0.8', userSelect: 'none',
           });
-          chapterEl.appendChild(respHeader);
-
-          const respText = document.createElement('div');
-          respText.textContent = ch.response;
-          Object.assign(respText.style, {
-            color: '#FFF1E8', fontSize: '11px', lineHeight: '1.5',
-            paddingLeft: '8px', borderLeft: '2px solid #00E436',
-          });
-          chapterEl.appendChild(respText);
-        }
-
-        // 🔧 Tools 섹션 (요약 + 펼침)
-        if (ch.tools && ch.tools.length > 0) {
-          const toolCounts = {};
-          ch.tools.forEach(t => { toolCounts[t.name] = (toolCounts[t.name] || 0) + 1; });
-          const summary = Object.entries(toolCounts).map(([n, c]) => c > 1 ? `${n}×${c}` : n).join(', ');
-
-          const toolWrap = document.createElement('div');
-          Object.assign(toolWrap.style, { marginTop: '6px' });
-
-          const toolHeader = document.createElement('div');
-          toolHeader.textContent = '🔧 ' + summary;
-          Object.assign(toolHeader.style, {
-            color: '#AB5236', fontSize: '10px', cursor: 'pointer', userSelect: 'none',
-          });
-
-          const toolDetail = document.createElement('div');
-          Object.assign(toolDetail.style, { maxHeight: '0', overflow: 'hidden', transition: 'max-height 0.2s ease' });
-          ch.tools.forEach(t => {
-            const line = document.createElement('div');
-            line.textContent = `  ${t.name}${t.detail ? ' → ' + t.detail : ''}`;
-            Object.assign(line.style, { color: '#8E8E8E', fontSize: '9px', paddingLeft: '12px', lineHeight: '1.6' });
-            toolDetail.appendChild(line);
-          });
-
-          toolHeader.addEventListener('click', (e) => {
+          moreBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            toolDetail.style.maxHeight = toolDetail.style.maxHeight === '0px' ? '200px' : '0px';
+            expanded = !expanded;
+            for (const el of hiddenEls) el.style.display = expanded ? '' : 'none';
+            moreBtn.textContent = expanded ? '▲ 접기' : `▼ +${hiddenEls.length}개 더보기`;
           });
-          toolWrap.appendChild(toolHeader);
-          toolWrap.appendChild(toolDetail);
-          chapterEl.appendChild(toolWrap);
-        }
-
-        // 🤖 Agents 섹션 (요약 + 펼침)
-        if (ch.agents && ch.agents.length > 0) {
-          const agentSummary = ch.agents.map(a => a.type).join(', ');
-
-          const agentWrap = document.createElement('div');
-          Object.assign(agentWrap.style, { marginTop: '4px' });
-
-          const agentHeader = document.createElement('div');
-          agentHeader.textContent = '🤖 ' + agentSummary;
-          Object.assign(agentHeader.style, {
-            color: '#7E2553', fontSize: '10px', cursor: 'pointer', userSelect: 'none',
-          });
-
-          const agentDetail = document.createElement('div');
-          Object.assign(agentDetail.style, { maxHeight: '0', overflow: 'hidden', transition: 'max-height 0.2s ease' });
-          ch.agents.forEach(a => {
-            const line = document.createElement('div');
-            line.textContent = `  ${a.type}${a.desc ? ': ' + a.desc : ''}`;
-            Object.assign(line.style, { color: '#8E8E8E', fontSize: '9px', paddingLeft: '12px', lineHeight: '1.6' });
-            agentDetail.appendChild(line);
-          });
-
-          agentHeader.addEventListener('click', (e) => {
-            e.stopPropagation();
-            agentDetail.style.maxHeight = agentDetail.style.maxHeight === '0px' ? '200px' : '0px';
-          });
-          agentWrap.appendChild(agentHeader);
-          agentWrap.appendChild(agentDetail);
-          chapterEl.appendChild(agentWrap);
-        }
-
-        // 📁 Files 섹션
-        if (ch.files && ch.files.length > 0) {
-          const filesDiv = document.createElement('div');
-          filesDiv.textContent = '📁 ' + ch.files.join(', ');
-          Object.assign(filesDiv.style, {
-            color: '#83769C', fontSize: '10px', marginTop: '6px',
-          });
-          chapterEl.appendChild(filesDiv);
+          chapterEl.appendChild(moreBtn);
         }
 
         groupBody.appendChild(chapterEl);
@@ -1632,15 +1673,16 @@ async function showChrisLogPopup() {
       groupHeader.addEventListener('click', () => {
         isOpen = !isOpen;
         if (isOpen) {
-          groupBody.style.maxHeight = grp.chapters.length * 500 + 'px';
+          groupBody.style.maxHeight = 'none';
           groupArrow.style.transform = 'rotate(90deg)';
-          groupTitle.textContent = '👤 ' + fullMsg;
-          groupTitle.style.whiteSpace = 'normal';
+          groupTitle.textContent = '👤 ' + grp.userMsg;
+          groupTitle.style.whiteSpace = 'pre-wrap';
           groupTitle.style.overflow = 'visible';
+          groupTitle.style.wordBreak = 'break-word';
         } else {
           groupBody.style.maxHeight = '0';
           groupArrow.style.transform = 'rotate(0deg)';
-          groupTitle.textContent = '👤 ' + grp.userMsg;
+          groupTitle.textContent = '👤 ' + shortMsg;
           groupTitle.style.whiteSpace = 'nowrap';
           groupTitle.style.overflow = 'hidden';
         }

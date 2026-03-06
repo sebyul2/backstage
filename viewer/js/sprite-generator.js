@@ -1,8 +1,11 @@
-// sprite-generator.js — High-quality 48x48 chibi character sprite generation (PICO-8 palette)
+// sprite-generator.js — High-quality 96x96 (2x scaled) chibi character sprite generation (PICO-8 palette)
 // Generates spritesheet-style offscreen canvases for each character
 // Inspired by Gather Town / RPG Maker quality pixel art
 
 import { PICO8 } from './map.js';
+
+// ─── Sprite scale factor (2x for high-quality rendering) ───
+const S = 2;
 
 // ─── Color indices in PICO-8 palette ───
 const C = {
@@ -97,12 +100,12 @@ const CHARACTER_CONFIGS = {
 
 function px(ctx, x, y, color) {
   ctx.fillStyle = color;
-  ctx.fillRect(x, y, 1, 1);
+  ctx.fillRect(x * S, y * S, S, S);
 }
 
 function rect(ctx, x, y, w, h, color) {
   ctx.fillStyle = color;
-  ctx.fillRect(x, y, w, h);
+  ctx.fillRect(x * S, y * S, w * S, h * S);
 }
 
 // Draw outlined rect: 1px outline of outlineColor, filled with fillColor
@@ -118,7 +121,7 @@ function outlinedRect(ctx, x, y, w, h, fillColor, outlineColor) {
 function drawShadow(ctx, cx, cy) {
   ctx.fillStyle = 'rgba(29,43,83,0.25)';
   ctx.beginPath();
-  ctx.ellipse(cx, cy, 9, 3, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx * S, cy * S, 9 * S, 3 * S, 0, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -411,12 +414,12 @@ function drawGlassesFront(ctx, cx, eyeY) {
   // Left lens frame
   rect(ctx, cx - 6, eyeY - 1, 5, 5, frameColor);
   ctx.fillStyle = lensColor;
-  ctx.fillRect(cx - 5, eyeY, 3, 3);
+  ctx.fillRect((cx - 5) * S, eyeY * S, 3 * S, 3 * S);
 
   // Right lens frame
   rect(ctx, cx + 1, eyeY - 1, 5, 5, frameColor);
   ctx.fillStyle = lensColor;
-  ctx.fillRect(cx + 2, eyeY, 3, 3);
+  ctx.fillRect((cx + 2) * S, eyeY * S, 3 * S, 3 * S);
 
   // Bridge
   rect(ctx, cx - 1, eyeY, 2, 1, frameColor);
@@ -429,7 +432,7 @@ function drawGlassesSide(ctx, cx, eyeY, facingLeft) {
 
   rect(ctx, lx, eyeY - 1, 5, 5, frameColor);
   ctx.fillStyle = lensColor;
-  ctx.fillRect(lx + 1, eyeY, 3, 3);
+  ctx.fillRect((lx + 1) * S, eyeY * S, 3 * S, 3 * S);
 
   // Temple (arm of glasses going to ear)
   const templeX = facingLeft ? lx + 5 : lx - 1;
@@ -1058,7 +1061,7 @@ function drawCharacterFrame(ctx, config, dir, frame, isIdle) {
 // ─── Spritesheet generation ───
 
 // Generate a full spritesheet for a character
-// Returns: { canvas, frameWidth: 48, frameHeight: 48, cols: 4, rows: 5 }
+// Returns: { canvas, frameWidth: 96, frameHeight: 96, cols: 4, rows: 5 }
 // Layout: 4 cols x 5 rows
 //   Row 0: walk-down (4 frames)
 //   Row 1: walk-left (4 frames)
@@ -1071,8 +1074,8 @@ export function generateSpriteSheet(name) {
 
   const cols = 4;
   const rows = 5;
-  const fw = 48;
-  const fh = 48;
+  const fw = 48 * S;
+  const fh = 48 * S;
   const canvas = document.createElement('canvas');
   canvas.width = cols * fw;
   canvas.height = rows * fh;

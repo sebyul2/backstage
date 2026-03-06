@@ -190,7 +190,44 @@ fi
 
 echo ""
 
-# 5. Create enabled file
+# 5. Update plugin cache (for /server on)
+echo "Updating plugin cache ..."
+
+PLUGIN_VERSION=$(jq -r '.version // "0.0.0"' "$SCRIPT_DIR/.claude-plugin/plugin.json" 2>/dev/null || echo "0.0.0")
+CACHE_DIR="$HOME/.claude/plugins/cache/backstage/claude-backstage/$PLUGIN_VERSION"
+
+mkdir -p "$CACHE_DIR"
+
+# Copy viewer to cache
+if [ -d "$SCRIPT_DIR/viewer" ]; then
+  mkdir -p "$CACHE_DIR/viewer"
+  rsync -a \
+    --exclude='node_modules' \
+    --exclude='.omc' \
+    "$SCRIPT_DIR/viewer/" "$CACHE_DIR/viewer/"
+  echo -e "  ${GREEN}✓${NC} viewer/ → cache ($PLUGIN_VERSION)"
+fi
+
+# Copy hooks to cache
+if [ -d "$SCRIPT_DIR/hooks" ]; then
+  mkdir -p "$CACHE_DIR/hooks"
+  rsync -a "$SCRIPT_DIR/hooks/" "$CACHE_DIR/hooks/"
+  echo -e "  ${GREEN}✓${NC} hooks/ → cache ($PLUGIN_VERSION)"
+fi
+
+# Copy skills to cache
+if [ -d "$SCRIPT_DIR/skills" ]; then
+  mkdir -p "$CACHE_DIR/skills"
+  rsync -a "$SCRIPT_DIR/skills/" "$CACHE_DIR/skills/"
+  echo -e "  ${GREEN}✓${NC} skills/ → cache ($PLUGIN_VERSION)"
+fi
+
+# Copy plugin metadata
+[ -d "$SCRIPT_DIR/.claude-plugin" ] && cp -r "$SCRIPT_DIR/.claude-plugin" "$CACHE_DIR/"
+
+echo ""
+
+# 6. Create enabled file
 touch "$PLUGIN_DIR/enabled"
 echo -e "${GREEN}✓${NC} Backstage enabled ($PLUGIN_DIR/enabled)"
 

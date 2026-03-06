@@ -12,8 +12,8 @@ export class GameEngine {
     this.renderCallbacks = [];
     this.rafId = null;
 
-    // HiDPI support: scale canvas buffer by devicePixelRatio
-    const dpr = window.devicePixelRatio || 1;
+    // HiDPI support: minimum 2x for quality pixel art rendering
+    const dpr = Math.max(2, window.devicePixelRatio || 1);
     canvas.width = logicalW * dpr;
     canvas.height = logicalH * dpr;
     canvas.style.width = logicalW + 'px';
