@@ -5,6 +5,10 @@
   "owner": {
     "name": "aster"
   },
+  "metadata": {
+    "description": "Pixel art office viewer - watch AI agents work in a Gather Town style startup office",
+    "version": "0.2.9"
+  },
   "plugins": [
     {
       "name": "backstage",
