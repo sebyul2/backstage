@@ -230,6 +230,26 @@ function randomMood(): string {
   return moods[Math.floor(Math.random() * moods.length)];
 }
 
+// ─── 최근 작업 맥락 가져오기 ─────────────────────────────────────
+function getRecentWorkContext(): string {
+  try {
+    if (!fs.existsSync(HISTORY_FILE)) return '';
+    const lines = fs.readFileSync(HISTORY_FILE, 'utf-8').split('\n').filter(l => l.trim());
+    const recent: string[] = [];
+    // 최근 20줄에서 assign/done/request 이벤트의 msg 추출
+    const tail = lines.slice(-20);
+    for (const line of tail) {
+      try {
+        const e = JSON.parse(line);
+        if ((e.type === 'assign' || e.type === 'done' || e.type === 'request') && e.msg && e.msg.length > 3) {
+          recent.push(`${e.speaker}: ${e.msg.slice(0, 60)}`);
+        }
+      } catch {}
+    }
+    return recent.slice(-3).join(', ');
+  } catch { return ''; }
+}
+
 // ─── AI Idle Chat Generator (Break Room — 1분 간격 AI 대화) ─────
 let lastAiIdleChatTime = 0;
 
@@ -254,9 +274,12 @@ async function generateAiIdleChat(): Promise<void> {
   const desc2 = i18nData?.c_team?.[char2] || i18nData?.c_team?._default || 'IT startup team member';
 
   const mood = randomMood();
+  const workCtx = getRecentWorkContext();
+  const ctxKo = workCtx ? ` 팀 근황: ${workCtx}.` : '';
+  const ctxEn = workCtx ? ` Team updates: ${workCtx}.` : '';
   const prompt = config.language === 'ko'
-    ? `IT스타트업 휴게실. ${char1}(${desc1})와 ${char2}(${desc2})가 잡담 중. 현재 분위기: ${mood}. 아재개그/야근드립 필수, 각자 딱 1번씩만, 20-40자/줄, 한국어. JSON만: {"lines":[{"speaker":"${char1}","msg":".."},{"speaker":"${char2}","msg":".."}]}`
-    : `IT startup break room. ${char1}(${desc1}) and ${char2}(${desc2}) chatting. Mood: ${mood}. Dad jokes + dev humor, each speaks exactly once, 20-40 chars/line. JSON only: {"lines":[{"speaker":"${char1}","msg":".."},{"speaker":"${char2}","msg":".."}]}`;
+    ? `IT스타트업 휴게실. ${char1}(${desc1})와 ${char2}(${desc2})가 잠깐 쉬면서 수다 중. 분위기: ${mood}.${ctxKo} 여유있게 휴식하는 톤, 아재개그/야근드립 가능, 각자 딱 1번씩만, 20-40자/줄, 한국어. JSON만: {"lines":[{"speaker":"${char1}","msg":".."},{"speaker":"${char2}","msg":".."}]}`
+    : `IT startup break room. ${char1}(${desc1}) and ${char2}(${desc2}) taking a break, chatting casually. Mood: ${mood}.${ctxEn} Relaxed resting tone, dev humor ok, each speaks exactly once, 20-40 chars/line. JSON only: {"lines":[{"speaker":"${char1}","msg":".."},{"speaker":"${char2}","msg":".."}]}`;
 
   // dialogue-queue에 추가 (processDialogueQueue가 처리)
   const queueEntry = JSON.stringify({
@@ -288,9 +311,12 @@ async function generateCTeamChat(): Promise<void> {
   const desc = i18nData?.c_team?.[char] || i18nData?.c_team?._default || 'IT startup team member';
 
   const mood = randomMood();
+  const workCtx = getRecentWorkContext();
+  const ctxKo = workCtx ? ` 팀 근황: ${workCtx}.` : '';
+  const ctxEn = workCtx ? ` Team updates: ${workCtx}.` : '';
   const prompt = config.language === 'ko'
-    ? `IT스타트업. ${char}(${desc}) 무한노동 중 한마디. 현재 분위기: ${mood}. 아재개그/야근드립 필수, Chris(팀장)와 딱 1번씩, 20-40자/줄, 한국어. JSON만: {"lines":[{"speaker":"boss","msg":".."},{"speaker":"${char}","msg":".."}]}`
-    : `IT startup. ${char}(${desc}) working non-stop. Mood: ${mood}. Dad jokes + overtime humor, exchange with Chris(boss) exactly once each, 20-40 chars/line. JSON only: {"lines":[{"speaker":"boss","msg":".."},{"speaker":"${char}","msg":".."}]}`;
+    ? `IT스타트업. ${char}(${desc}) 무한노동 중 한마디. 분위기: ${mood}.${ctxKo} 아재개그/야근드립 필수, Chris(팀장)와 딱 1번씩, 20-40자/줄, 한국어. JSON만: {"lines":[{"speaker":"boss","msg":".."},{"speaker":"${char}","msg":".."}]}`
+    : `IT startup. ${char}(${desc}) working non-stop. Mood: ${mood}.${ctxEn} Dad jokes + overtime humor, exchange with Chris(boss) exactly once each, 20-40 chars/line. JSON only: {"lines":[{"speaker":"boss","msg":".."},{"speaker":"${char}","msg":".."}]}`;
 
   const queueEntry = JSON.stringify({
     epoch: Math.floor(now / 1000),

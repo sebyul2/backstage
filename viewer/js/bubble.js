@@ -184,8 +184,11 @@ export class BubbleManager {
     const colors = TYPE_COLORS[bubble.type] || TYPE_COLORS.talk;
     const { width, height, lines, alpha, scale } = bubble;
 
-    // Position bubble above character, centered (clamp to canvas top)
-    const bx = cx - width / 2;
+    // Position bubble above character, centered (clamp to canvas bounds)
+    const canvasW = ctx.canvas.width;
+    let bx = cx - width / 2;
+    if (bx < 4) bx = 4; // 좌측 clamp
+    if (bx + width > canvasW - 4) bx = canvasW - width - 4; // 우측 clamp
     let by = cy - height - BUBBLE_TAIL_H;
     if (by < 42) by = 42; // 상단 UI 영역(progress bar 등) 아래로 clamp
 

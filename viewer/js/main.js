@@ -284,7 +284,10 @@ function handleSSEEvent(entry) {
 
   // 정보성/내부 이벤트는 CHAT 뷰에서 필터 (캔버스에만 표시)
   const chatHidden = new Set(['think', 'work', 'work-done', 'c-active', 'c-idle', 'agent-status']);
-  if (!chatHidden.has(type)) {
+  // task-notification XML이나 system-reminder가 포함된 메시지도 필터
+  const msgText = entry.msg || '';
+  const hasXmlNoise = msgText.includes('<task-notification') || msgText.includes('<system-reminder');
+  if (!chatHidden.has(type) && !hasXmlNoise) {
     addChatMessage(entry);
   }
 
