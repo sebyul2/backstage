@@ -95,6 +95,9 @@ if [ "$tool_name" = "TaskCreate" ]; then
         '{ts:$ts,epoch:($ep|tonumber),type:"task-create",speaker:"Board",role:"system",msg:"",data:{subject:$subj,description:$desc,status:"pending"}}' >> "$HISTORY_FILE"
 fi
 
+# 서버에 즉시 transcript 스캔 트리거 (thinking 실시간 반영)
+curl -s http://localhost:7777/trigger-scan >/dev/null 2>&1 &
+
 if [ "$tool_name" = "Task" ] || [ "$tool_name" = "Agent" ]; then
     agent_type=$(echo "$input" | jq -r '.tool_input.subagent_type // "unknown"')
     description=$(echo "$input" | jq -r '.tool_input.description // ""')

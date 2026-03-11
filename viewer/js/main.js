@@ -284,10 +284,17 @@ function handleSSEEvent(entry) {
 
   // 정보성/내부 이벤트는 CHAT 뷰에서 필터 (캔버스에만 표시)
   const chatHidden = new Set(['think', 'work', 'work-done', 'c-active', 'c-idle', 'agent-status']);
-  // task-notification XML이나 system-reminder가 포함된 메시지도 필터
+  // task-notification XML이나 system-reminder가 포함된 메시지 처리
   const msgText = entry.msg || '';
-  const hasXmlNoise = msgText.includes('<task-notification') || msgText.includes('<system-reminder');
-  if (!chatHidden.has(type) && !hasXmlNoise) {
+  if (msgText.includes('<task-notification') || msgText.includes('<system-reminder')) {
+    // request/user-input은 XML strip 후 표시, 나머지는 필터
+    if (type === 'request' || type === 'user-input') {
+      const cleaned = msgText.replace(/<(task-notification|system-reminder)>[\s\S]*?<\/(task-notification|system-reminder)>/g, '').trim();
+      if (cleaned) {
+        addChatMessage({ ...entry, msg: cleaned });
+      }
+    }
+  } else if (!chatHidden.has(type)) {
     addChatMessage(entry);
   }
 
@@ -626,6 +633,7 @@ function connectSSE() {
 
   renderer.connectionStatus = 'connecting';
   eventSource = new EventSource('/events');
+  window._sseSource = eventSource;
 
   eventSource.addEventListener('connected', () => {
     renderer.connectionStatus = 'connected';
@@ -1429,14 +1437,23 @@ async function showChrisLogPopup() {
 
   // 콘텐츠 영역 (폴링 시 이 영역만 갱신)
   const contentContainer = document.createElement('div');
+  contentContainer.style.transition = 'opacity 0.3s ease';
   popup.appendChild(contentContainer);
 
-  let lastChapterCount = 0;
+  let lastChapterHash = '';
+  const openGroups = new Set(); // 펼친 그룹 키를 기억 (리렌더 시 상태 보존)
+  const expandedChapters = new Set(); // 더보기 펼친 챕터 키 (리렌더 시 상태 보존)
 
   function renderContent(chapters) {
-    lastChapterCount = chapters.length;
+   try {
     const scrollTop = popup.scrollTop;
-    contentContainer.innerHTML = '';
+    // 기존 키 수집 (새 그룹 감지용)
+    const _prevKeys = new Set();
+    for (const child of [...contentContainer.children]) {
+      if (child.dataset.groupKey) _prevKeys.add(child.dataset.groupKey);
+    }
+    // offscreen fragment에 빌드 후 한 번에 교체 (열린 그룹이 접혔다 펼쳐지는 깜빡임 방지)
+    const _fragment = document.createDocumentFragment();
 
     // userMsg 기준으로 그룹핑
     const groups = [];
@@ -1463,12 +1480,15 @@ async function showChrisLogPopup() {
     const empty = document.createElement('div');
     empty.textContent = window.i18n?.ui?.chris_log_empty || 'No entries recorded yet.';
     Object.assign(empty.style, { color: '#5F574F', fontSize: '12px' });
-    contentContainer.appendChild(empty);
+    _fragment.appendChild(empty);
   } else {
-    // 2레벨 그룹핑 렌더링
     for (const grp of groups) {
       // 🔄 Compacting 이벤트 — 특별 스타일로 표시
       if (grp.isCompact) {
+        const compactKey = 'compact|' + (grp.ts || '');
+        if (_prevKeys.has(compactKey)) {
+          // 기존 compact — 그대로 재생성
+        }
         const compactEl = document.createElement('div');
         Object.assign(compactEl.style, {
           marginBottom: '10px', padding: '8px 12px',
@@ -1483,9 +1503,18 @@ async function showChrisLogPopup() {
         Object.assign(compactTs.style, { color: '#5F574F', fontSize: '10px', marginLeft: '12px' });
         compactEl.appendChild(compactText);
         compactEl.appendChild(compactTs);
-        contentContainer.appendChild(compactEl);
+        compactEl.dataset.groupKey = compactKey;
+        _fragment.appendChild(compactEl);
         continue;
       }
+
+      // 그룹 key 계산 + 기존 DOM 재사용 (펼침 상태 보존)
+      const groupKey = (grp.userMsg || '').slice(0, 100) + '|' + (grp.chapters[0]?.ts || grp.ts || '');
+      const _isNewGroup = !_prevKeys.has(groupKey);
+
+      // 그룹 토글 키 + 열림 상태 (DOM 생성 전에 결정해야 깜빡임 방지)
+      const openKey = (grp.userMsg || '').slice(0, 100);
+      const isOpen = openGroups.has(openKey);
 
       const groupEl = document.createElement('div');
       Object.assign(groupEl.style, {
@@ -1509,10 +1538,14 @@ async function showChrisLogPopup() {
 
       const groupTitle = document.createElement('span');
       const shortMsg = grp.userMsg.split('\n')[0].slice(0, 80);
-      groupTitle.textContent = '👤 ' + shortMsg;
+      groupTitle.textContent = '👤 ' + (isOpen ? grp.userMsg : shortMsg);
       Object.assign(groupTitle.style, {
         color: '#FFF1E8', fontSize: '12px', fontWeight: 'bold',
-        flex: '1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        flex: '1',
+        overflow: isOpen ? 'visible' : 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: isOpen ? 'pre-wrap' : 'nowrap',
+        wordBreak: isOpen ? 'break-word' : 'normal',
       });
 
       const groupMeta = document.createElement('span');
@@ -1526,18 +1559,19 @@ async function showChrisLogPopup() {
       Object.assign(groupArrow.style, {
         color: '#FF77A8', fontSize: '12px', marginLeft: '8px',
         transition: 'transform 0.2s',
+        transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
       });
 
       groupHeader.appendChild(groupTitle);
       groupHeader.appendChild(groupMeta);
       groupHeader.appendChild(groupArrow);
 
-      // 레벨 2: 챕터 본문들 (기본 접힘)
+      // 레벨 2: 챕터 본문들 (isOpen이면 처음부터 열린 상태로 생성)
       const groupBody = document.createElement('div');
       Object.assign(groupBody.style, {
-        maxHeight: '0',
-        overflow: 'hidden',
-        transition: 'max-height 0.3s ease',
+        maxHeight: isOpen ? 'none' : '0',
+        overflow: isOpen ? 'visible' : 'hidden',
+        transition: isOpen ? 'none' : 'max-height 0.3s ease',
         background: '#0F1A33',
       });
 
@@ -1556,6 +1590,23 @@ async function showChrisLogPopup() {
             marginBottom: '10px',
           });
           chapterEl.insertBefore(divider, chapterEl.firstChild);
+        }
+
+        // pending 챕터: 아직 응답이 없는 사용자 메시지
+        if (ch.pending) {
+          const pendingEl = document.createElement('div');
+          pendingEl.textContent = '⏳ ' + (window.i18n?.ui?.pending || '응답 대기 중...');
+          Object.assign(pendingEl.style, {
+            color: '#FFEC27', fontSize: '11px', padding: '8px 0',
+            opacity: '0.7', fontStyle: 'italic',
+          });
+          // 점멸 애니메이션
+          pendingEl.animate([{ opacity: 0.4 }, { opacity: 1 }], {
+            duration: 1200, iterations: Infinity, direction: 'alternate',
+          });
+          chapterEl.appendChild(pendingEl);
+          groupBody.appendChild(chapterEl);
+          return; // 이 챕터는 여기서 끝
         }
 
         // 시간순 steps 렌더링 (카테고리 헤더 + 전체 더보기)
@@ -1692,10 +1743,12 @@ async function showChrisLogPopup() {
         }
 
         // 전체 더보기: 처음 INITIAL_VISIBLE개만 표시, 나머지는 숨김
+        const chapterKey = groupKey + '|ch' + idx;
         const hiddenEls = [];
+        let expanded = expandedChapters.has(chapterKey);
         stepElements.forEach((el, i) => {
           if (i >= INITIAL_VISIBLE) {
-            el.style.display = 'none';
+            el.style.display = expanded ? '' : 'none';
             hiddenEls.push(el);
           }
           chapterEl.appendChild(el);
@@ -1703,8 +1756,9 @@ async function showChrisLogPopup() {
 
         if (hiddenEls.length > 0) {
           const moreBtn = document.createElement('div');
-          let expanded = false;
-          moreBtn.textContent = (window.i18n?.ui?.more_button || '▼ +${n} more').replace('${n}', hiddenEls.length);
+          moreBtn.textContent = expanded
+            ? (window.i18n?.ui?.collapse_button || '▲ Collapse')
+            : (window.i18n?.ui?.more_button || '▼ +${n} more').replace('${n}', hiddenEls.length);
           Object.assign(moreBtn.style, {
             color: '#29ADFF', fontSize: '10px', cursor: 'pointer',
             marginTop: '6px', opacity: '0.8', userSelect: 'none',
@@ -1712,6 +1766,7 @@ async function showChrisLogPopup() {
           moreBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             expanded = !expanded;
+            if (expanded) expandedChapters.add(chapterKey); else expandedChapters.delete(chapterKey);
             for (const el of hiddenEls) el.style.display = expanded ? '' : 'none';
             moreBtn.textContent = expanded ? (window.i18n?.ui?.collapse_button || '▲ Collapse') : (window.i18n?.ui?.more_button || '▼ +${n} more').replace('${n}', hiddenEls.length);
           });
@@ -1722,10 +1777,8 @@ async function showChrisLogPopup() {
       });
 
       // 그룹 토글 동작
-      let isOpen = false;
-      groupHeader.addEventListener('click', () => {
-        isOpen = !isOpen;
-        if (isOpen) {
+      const applyOpen = (open) => {
+        if (open) {
           groupBody.style.maxHeight = 'none';
           groupArrow.style.transform = 'rotate(90deg)';
           groupTitle.textContent = '👤 ' + grp.userMsg;
@@ -1739,34 +1792,84 @@ async function showChrisLogPopup() {
           groupTitle.style.whiteSpace = 'nowrap';
           groupTitle.style.overflow = 'hidden';
         }
+      };
+
+      let _isOpenState = isOpen;
+      groupHeader.addEventListener('click', () => {
+        _isOpenState = !_isOpenState;
+        if (_isOpenState) openGroups.add(openKey); else openGroups.delete(openKey);
+        applyOpen(_isOpenState);
       });
 
       groupEl.appendChild(groupHeader);
       groupEl.appendChild(groupBody);
-      contentContainer.appendChild(groupEl);
+      groupEl.dataset.groupKey = groupKey;
+      _fragment.appendChild(groupEl);
+
+      // 새 그룹만 낑겨넣기 애니메이션 (기존 그룹은 즉시 렌더)
+      if (_isNewGroup && _prevKeys.size > 0) {
+        groupEl.style.overflow = 'hidden';
+        groupEl.style.maxHeight = '0';
+        groupEl.style.opacity = '0';
+        groupEl.style.transition = 'max-height 0.35s ease, opacity 0.3s ease 0.05s';
+        requestAnimationFrame(() => {
+          groupEl.style.maxHeight = groupEl.scrollHeight + 'px';
+          groupEl.style.opacity = '1';
+          groupEl.addEventListener('transitionend', () => { groupEl.style.maxHeight = ''; groupEl.style.overflow = ''; }, { once: true });
+        });
+      }
     }
   }
 
+    // 한 번에 교체: 열린 그룹이 접혔다 펼쳐지는 깜빡임 없음
+    contentContainer.replaceChildren(..._fragment.childNodes);
     popup.scrollTop = scrollTop;
+   } catch (err) {
+    console.error('[renderContent] Error:', err);
+    contentContainer.innerHTML = '';
+    const errEl = document.createElement('div');
+    errEl.textContent = 'renderContent error: ' + err.message;
+    Object.assign(errEl.style, { color: '#FF004D', fontSize: '11px', padding: '12px' });
+    contentContainer.appendChild(errEl);
+   }
   } // end renderContent
+
+  // SSE 구독용 변수 (초기 로드 전에 선언 필수)
+  let refetchTimer = null;
+  let lastJsonStr = '';
 
   // 초기 렌더링
   try {
     const res = await fetch('/chris-log');
-    if (res.ok) { const chapters = await res.json(); renderContent(chapters); }
-  } catch {}
-
-  // 2초 폴링 — 변경 시에만 재렌더
-  const pollInterval = setInterval(async () => {
-    try {
-      const res = await fetch('/chris-log');
-      if (!res.ok) return;
+    if (res.ok) {
       const chapters = await res.json();
-      if (chapters.length !== lastChapterCount) renderContent(chapters);
-    } catch {}
-  }, 2000);
+      lastJsonStr = JSON.stringify(chapters);
+      renderContent(chapters);
+    }
+  } catch {}
+  // 모든 SSE 이벤트에 debounce refetch (1.5초) — 타입 필터 불필요, debounce가 과다 요청 방지
+  const sseRefetch = (ev) => {
+    if (refetchTimer) clearTimeout(refetchTimer);
+    refetchTimer = setTimeout(async () => {
+      try {
+        const res = await fetch('/chris-log');
+        if (!res.ok) return;
+        const chapters = await res.json();
+        const jsonStr = JSON.stringify(chapters);
+        if (jsonStr === lastJsonStr) return; // 실제 변경 없으면 스킵
+        lastJsonStr = jsonStr;
+        renderContent(chapters);
+      } catch {}
+    }, 1500);
+  };
+  if (window._sseSource) {
+    window._sseSource.addEventListener('message', sseRefetch);
+  }
 
-  const cleanup = () => clearInterval(pollInterval);
+  const cleanup = () => {
+    if (refetchTimer) clearTimeout(refetchTimer);
+    if (window._sseSource) window._sseSource.removeEventListener('message', sseRefetch);
+  };
 
   // X 버튼 클릭 닫기
   closeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); cleanup(); overlay.remove(); });

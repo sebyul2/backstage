@@ -63,8 +63,12 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+// 서버 시작 시 캐시 버스트 키 생성 (재시작할 때마다 갱신 → 브라우저 캐싱 자동 무효화)
+const CACHE_BUST = Date.now().toString(36);
+
 let lastUserMessage = '';
 let lastChapterUserMsg = '';  // 마지막 챕터의 사용자 메시지 (그룹핑용)
+let pendingChapterSteps: any[] = [];  // 진행 중인 챕터의 steps (thinking만 있을 때 pending에 표시)
 
 // ─── Dynamic agent pool (no fixed role mapping) ─────────────────
 const AGENT_POOL = ['Jake', 'David', 'Kevin', 'Sophie', 'Emily', 'Michael', 'Alex', 'Sam'];
@@ -807,8 +811,41 @@ function scanTranscriptForAgentWork(): void {
       // dialogue-generator는 건너뛰기 (대사 생성 에이전트이므로 완료 보고 불필요)
       if (info.agentType.includes('dialogue-generator')) continue;
 
-      // AI 대화 ON이면 완료 대사 없이 조용히 done (대사는 assign 시점에만)
+      // AI 대화 ON이면 완료 대사를 AI로 생성
       if (config.ai_dialogue) {
+        // 최근 작업 내용 찾기
+        let taskDesc = info.agentType || 'task';
+        try {
+          if (fs.existsSync(HISTORY_FILE)) {
+            const hLines = fs.readFileSync(HISTORY_FILE, 'utf-8').trim().split('\n').reverse();
+            for (const hl of hLines) {
+              try {
+                const ev = JSON.parse(hl);
+                if (ev.speaker === name && (ev.type === 'assign' || ev.type === 'c-bubble') && ev.msg) {
+                  taskDesc = ev.msg.slice(0, 80);
+                  break;
+                }
+              } catch {}
+            }
+          }
+        } catch {}
+
+        const i18nPath = path.join(PLUGIN_DIR, `hooks-i18n/${config.language || 'en'}.json`);
+        let i18nData: any = {};
+        try { i18nData = JSON.parse(fs.readFileSync(i18nPath, 'utf-8')); } catch {}
+        const completeTemplate = i18nData?.dialogue_prompt?.complete_template || '';
+
+        if (completeTemplate) {
+          const desc = i18nData?.c_team?.[name] || i18nData?.c_team?._default || 'team member';
+          const prompt = completeTemplate
+            .replace(/\$\{speaker\}/g, name)
+            .replace(/\$\{role\}/g, desc)
+            .replace(/\$\{task\}/g, taskDesc);
+          const queueEntry = JSON.stringify({ epoch, speaker: name, role: info.agentType, type: 'complete', prompt });
+          try { fs.appendFileSync(DIALOGUE_QUEUE_FILE, queueEntry + '\n'); } catch {}
+        }
+
+        // done 이벤트는 즉시 기록 (대사는 dialogue-queue에서 나중에 생성)
         const entry = JSON.stringify({ ts, epoch, type: "done", speaker: name, role: info.agentType, msg: "" });
         try { fs.appendFileSync(HISTORY_FILE, entry + "\n"); } catch {}
       } else {
@@ -946,7 +983,7 @@ function scanTranscriptForAgentWork(): void {
 
   // Chris thinking (from model's thinking blocks → 💭 thought bubbles, chunked)
   // Queue: extract all chunks from new thinking blocks, emit one per scan cycle
-  const thinkCondition = thinkQueue.length === 0 && nowEpoch - lastChrisTalkEpoch >= 3;
+  const thinkCondition = thinkQueue.length === 0 && nowEpoch - lastChrisTalkEpoch >= 1;
   console.log(`[think-debug] queue=${thinkQueue.length} gap=${nowEpoch - lastChrisTalkEpoch} lines=${lines.length} condition=${thinkCondition}`);
   if (thinkCondition) {
     for (const line of lines) {
@@ -1025,8 +1062,9 @@ function scanTranscriptForAgentWork(): void {
     }
   }
 
-  // Emit one thinking chunk per scan cycle (every 3 seconds)
-  if (thinkQueue.length > 0) {
+  // Emit thinking chunks: up to 2 per scan cycle for faster display
+  const thinkEmitCount = Math.min(thinkQueue.length, 2);
+  for (let ti = 0; ti < thinkEmitCount; ti++) {
     const msg = thinkQueue.shift()!;
     lastChrisTalkEpoch = nowEpoch;
 
@@ -1239,8 +1277,14 @@ function scanTranscriptForAgentWork(): void {
 
       // 스트리밍 분할 방어: response text 없이 thinking만 도착한 경우
       // chapterKey를 등록하지 않고 스킵 → 다음 스캔에서 response text 포함해 재처리
+      // 단, thinking steps를 pendingChapterSteps에 저장하여 /chris-log pending 챕터에서 실시간 표시
       const hasNonThink = steps.some((s: any) => s.type !== 'think');
-      if (!hasNonThink) continue;
+      if (!hasNonThink) {
+        pendingChapterSteps = [...steps];
+        continue;
+      }
+      // 챕터 확정 → pending steps 초기화
+      pendingChapterSteps = [];
 
       // response/tool 존재 확인됨 → chapterKey 등록 (중복 방지)
       recordedTextHashes.add(chapterKey);
@@ -1617,6 +1661,8 @@ async function handleRoot(): Promise<Response> {
   try {
     let html = fs.readFileSync(HTML_FILE, "utf-8");
     html = html.replace(/v\d+\.\d+(\.\d+)?/g, `v${PLUGIN_VERSION}`);
+    // 정적 파일 캐시 버스트: ?v=xxx를 서버 시작 시 생성된 키로 치환 (재시작 = 캐시 무효화)
+    html = html.replace(/\?v=[^"')]+/g, `?v=${CACHE_BUST}`);
     return new Response(html, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
@@ -1734,6 +1780,23 @@ const server = Bun.serve({
         try {
           const content = fs.existsSync(CHRIS_LOG_FILE) ? fs.readFileSync(CHRIS_LOG_FILE, 'utf-8') : '';
           const entries = content.trim().split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+
+          // 사용자 메시지 실시간 구독: 아직 응답이 없으면 빈 pending 챕터 추가
+          if (lastUserMessage) {
+            const lastEntry = entries[entries.length - 1];
+            const lastMsg = lastEntry?.userMsg || '';
+            const pendingMsg = lastUserMessage.split('\n')[0].slice(0, 100);
+            if (pendingMsg && pendingMsg !== lastMsg.slice(0, 100)) {
+              entries.push({
+                userMsg: lastUserMessage,
+                title: '',
+                ts: new Date().toTimeString().slice(0, 8),
+                steps: pendingChapterSteps.length > 0 ? [...pendingChapterSteps] : [],
+                pending: true,
+              });
+            }
+          }
+
           return new Response(JSON.stringify(entries), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
         } catch {
           return new Response('[]', { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
@@ -1906,6 +1969,12 @@ const server = Bun.serve({
           headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
         });
       case "/status":
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+      case "/trigger-scan":
+        // Hook에서 호출: 즉시 transcript 스캔 트리거 (thinking 실시간 반영)
+        try { scanTranscriptForAgentWork(); } catch {}
         return new Response(JSON.stringify({ ok: true }), {
           headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
         });
@@ -2149,7 +2218,7 @@ async function processDialogueQueue(): Promise<void> {
         ensureHistoryFile();
         // 시간차 대화: 첫 라인은 즉시, 나머지는 2초 간격으로 기록
         // → SSE 폴링에서 자연스럽게 순차 표시됨
-        const validLines = json.lines.filter((l: any) => l.msg);
+        const validLines = json.lines.filter((l: any) => l.msg).slice(0, 2); // 최대 2줄 (boss 1 + agent 1)
         for (let i = 0; i < validLines.length; i++) {
           const l = validLines[i];
           const rawSpeaker = l.speaker || entry.speaker || 'Agent';
