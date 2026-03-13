@@ -1779,13 +1779,17 @@ async function showChrisLogPopup() {
       // 그룹 토글 동작
       const applyOpen = (open) => {
         if (open) {
+          groupBody.style.overflow = 'visible';
           groupBody.style.maxHeight = 'none';
+          groupBody.style.transition = 'none';
           groupArrow.style.transform = 'rotate(90deg)';
           groupTitle.textContent = '👤 ' + grp.userMsg;
           groupTitle.style.whiteSpace = 'pre-wrap';
           groupTitle.style.overflow = 'visible';
           groupTitle.style.wordBreak = 'break-word';
         } else {
+          groupBody.style.overflow = 'hidden';
+          groupBody.style.transition = 'max-height 0.3s ease';
           groupBody.style.maxHeight = '0';
           groupArrow.style.transform = 'rotate(0deg)';
           groupTitle.textContent = '👤 ' + shortMsg;
