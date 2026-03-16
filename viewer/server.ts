@@ -407,6 +407,9 @@ let lastChrisTalkEpoch = 0;
 const recordedTextHashes = new Set<string>();
 const thinkQueue: string[] = [];
 
+// 멀티 세션: 다른 활성 Claude 세션의 transcript 추적
+const otherTranscriptOffsets: Map<string, number> = new Map();
+
 // Thinking cache: msgId → thinking content (survives transcript redaction)
 const thinkingCache = new Map<string, string>();
 let transcriptWatcher: fs.FSWatcher | null = null;
@@ -443,6 +446,150 @@ try {
   }
 } catch {}
 
+
+// cwd 기반으로 해당 프로젝트의 최신 transcript 파일 경로 반환
+// 인코딩된 프로젝트 디렉토리명에서 실제 프로젝트명 추출
+// 예: -Users-aster-workspace-claude-backstage → claude-backstage
+function resolveProjectName(encodedDir: string): string {
+  const home = homedir();
+  const homeEnc = home.replace(/\//g, '-');
+  if (!encodedDir.startsWith(homeEnc + '-')) return encodedDir;
+
+  const afterHome = encodedDir.slice(homeEnc.length + 1);
+  const segments = afterHome.split('-');
+
+  // 뒤에서부터 segment를 합쳐가며 실제 존재하는 디렉토리 찾기
+  for (let nameLen = 1; nameLen < segments.length; nameLen++) {
+    const dirPath = path.join(home, segments.slice(0, segments.length - nameLen).join('/'));
+    const candidate = segments.slice(segments.length - nameLen).join('-');
+    if (fs.existsSync(path.join(dirPath, candidate))) {
+      return candidate;
+    }
+  }
+  return afterHome;
+}
+
+// 다른 활성 세션의 transcript에서 Chris talk을 추출해 history에 기록
+// ps/lsof 없이 ~/.claude/projects/ 파일시스템만으로 활성 세션 감지
+function scanOtherSessionsTalk(): void {
+  const projectsDir = path.join(homedir(), '.claude/projects');
+  if (!fs.existsSync(projectsDir)) return;
+
+  const nowMs = Date.now();
+  const ACTIVE_THRESHOLD = 60_000; // 60초 이내 수정된 transcript만 활성으로 간주
+  const activeTranscripts = new Set<string>();
+
+  try {
+    for (const dir of fs.readdirSync(projectsDir)) {
+      if (dir.includes('claude-plugins-cache')) continue;
+
+      const fullDir = path.join(projectsDir, dir);
+      try { if (!fs.statSync(fullDir).isDirectory()) continue; } catch { continue; }
+
+      // 최신 .jsonl 찾기
+      let newest: { path: string; mtime: number } | null = null;
+      try {
+        for (const file of fs.readdirSync(fullDir)) {
+          if (!file.endsWith('.jsonl')) continue;
+          const fp = path.join(fullDir, file);
+          try {
+            const s = fs.statSync(fp);
+            if (s.size < 10_000) continue;
+            if (!newest || s.mtimeMs > newest.mtime) newest = { path: fp, mtime: s.mtimeMs };
+          } catch { continue; }
+        }
+      } catch { continue; }
+
+      if (!newest) continue;
+      if (newest.path === transcriptPath) continue; // 메인 세션 제외
+      if (nowMs - newest.mtime > ACTIVE_THRESHOLD) continue; // 비활성 제외
+
+      const tp = newest.path;
+      activeTranscripts.add(tp);
+      const projectName = resolveProjectName(dir);
+
+      let stat: fs.Stats;
+      try { stat = fs.statSync(tp); } catch { continue; }
+
+      // 첫 등장 시 현재 크기부터 시작 (과거 기록은 무시)
+      if (!otherTranscriptOffsets.has(tp)) {
+        otherTranscriptOffsets.set(tp, stat.size);
+        continue;
+      }
+
+      const currentOffset = otherTranscriptOffsets.get(tp)!;
+      if (stat.size <= currentOffset) continue;
+
+      // delta 읽기 (최대 256KB)
+      const readSize = Math.min(stat.size - currentOffset, 256 * 1024);
+      let content: string;
+      let fd: number | null = null;
+      try {
+        fd = fs.openSync(tp, 'r');
+        const buf = Buffer.alloc(readSize);
+        fs.readSync(fd, buf, 0, readSize, currentOffset);
+        content = buf.toString('utf-8');
+      } catch { continue; } finally {
+        if (fd !== null) fs.closeSync(fd);
+      }
+
+      otherTranscriptOffsets.set(tp, stat.size);
+
+      const tLines = content.trim().split('\n');
+      const nowEpoch = Math.floor(Date.now() / 1000);
+
+      for (const tLine of tLines) {
+        try {
+          const entry = JSON.parse(tLine);
+          if (entry.type !== 'assistant' || entry.message?.role !== 'assistant') continue;
+          if (!entry.message?.content) continue;
+
+          for (const block of entry.message.content) {
+            if (block.type !== 'text' || !block.text) continue;
+            const text = block.text.trim();
+            if (text.length < 10 || text.length > 2000) continue;
+            if (text.startsWith('<') || text.startsWith('{') || text.startsWith('```')) continue;
+
+            const meaningful = text.split('\n')
+              .map((l: string) => l.trim())
+              .filter((l: string) => l.length > 10 && l.length < 200)
+              .filter((l: string) => !l.startsWith('|') && !l.startsWith('```') && !l.startsWith('#') && !l.startsWith('- '))
+              .filter((l: string) => !/^(import|const|let|var|function|class|if|for|return|export)\b/.test(l));
+
+            if (meaningful.length === 0) continue;
+
+            let msg = meaningful[0];
+            if (msg.length > 100) msg = msg.slice(0, 97) + '...';
+
+            // 중복 체크
+            const hash = `other:${projectName}:${msg.slice(0, 80)}`;
+            if (recordedTextHashes.has(hash)) continue;
+            recordedTextHashes.add(hash);
+
+            // history에 기록 (프로젝트명 프리픽스로 세션 구분)
+            const histEntry = JSON.stringify({
+              ts: new Date().toTimeString().slice(0, 8),
+              epoch: nowEpoch,
+              type: 'talk',
+              speaker: 'Chris',
+              role: 'boss',
+              msg: `[${projectName}] ${msg}`,
+              project: projectName,
+            });
+            ensureHistoryFile();
+            try { fs.appendFileSync(HISTORY_FILE, histEntry + '\n'); } catch {}
+            break; // assistant 블록에서 하나만
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+
+  // 비활성 세션의 offset 정리
+  for (const [tp] of otherTranscriptOffsets) {
+    if (!activeTranscripts.has(tp)) otherTranscriptOffsets.delete(tp);
+  }
+}
 
 function findCurrentTranscript(): string | null {
   const projectsDir = path.join(homedir(), ".claude/projects");
@@ -1368,6 +1515,8 @@ function scanTranscriptForAgentWork(): void {
   }
 
   scanSubagentFiles();
+  // 멀티 세션: 다른 Claude 세션의 transcript 스캔
+  scanOtherSessionsTalk();
 }
 
 function scanSubagentFiles(): void {
