@@ -845,9 +845,12 @@ function scanTranscriptForAgentWork(): void {
           try { fs.appendFileSync(DIALOGUE_QUEUE_FILE, queueEntry + '\n'); } catch {}
         }
 
-        // done 이벤트는 즉시 기록 (대사는 dialogue-queue에서 나중에 생성)
-        const entry = JSON.stringify({ ts, epoch, type: "done", speaker: name, role: info.agentType, msg: "" });
-        try { fs.appendFileSync(HISTORY_FILE, entry + "\n"); } catch {}
+        // dialogue-queue에 complete 요청이 있으면 빈 done을 쓰지 않음
+        // → AI 대사가 생성되면 그때 done으로 기록됨 (이중 기록 방지)
+        if (!completeTemplate) {
+          const entry = JSON.stringify({ ts, epoch, type: "done", speaker: name, role: info.agentType, msg: "" });
+          try { fs.appendFileSync(HISTORY_FILE, entry + "\n"); } catch {}
+        }
       } else {
         // AI 대화 OFF: 기존 fallback 완료 대사 유지
         let doneMsg = "작업 완료";
@@ -2190,15 +2193,17 @@ async function processDialogueQueue(): Promise<void> {
           stderr: 'pipe',
           env: cleanEnv,
         });
-        const killTimer = setTimeout(() => { try { proc.kill(); } catch {} }, 30_000);
+        const killTimer = setTimeout(() => { try { proc.kill(); } catch {} }, 60_000);
 
         const output = await new Response(proc.stdout).text();
         const stderr = await new Response(proc.stderr).text();
         await proc.exited;
         clearTimeout(killTimer);
 
+        const exitCode = proc.exitCode;
         if (stderr.trim()) console.error('[dialogue] stderr:', stderr.trim().slice(0, 200));
-        if (!output.trim()) { console.log('[dialogue] empty output for:', entry.speaker); continue; }
+        if (!output.trim()) { console.log(`[dialogue] empty output for: ${entry.speaker} (exit=${exitCode}, prompt=${fullPrompt.slice(0, 80)}...)`); continue; }
+        console.log(`[dialogue] got output for ${entry.speaker}: ${output.trim().slice(0, 120)}`);
 
         // JSON 추출
         let json: any = null;
