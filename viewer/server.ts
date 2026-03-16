@@ -475,8 +475,6 @@ function scanOtherSessionsTalk(): void {
   const projectsDir = path.join(homedir(), '.claude/projects');
   if (!fs.existsSync(projectsDir)) return;
 
-  const nowMs = Date.now();
-  const ACTIVE_THRESHOLD = 60_000; // 60초 이내 수정된 transcript만 활성으로 간주
   const activeTranscripts = new Set<string>();
 
   try {
@@ -502,7 +500,7 @@ function scanOtherSessionsTalk(): void {
 
       if (!newest) continue;
       if (newest.path === transcriptPath) continue; // 메인 세션 제외
-      if (nowMs - newest.mtime > ACTIVE_THRESHOLD) continue; // 비활성 제외
+      // 모든 프로젝트의 transcript를 수집 (활성도 조건 없음)
 
       const tp = newest.path;
       activeTranscripts.add(tp);
