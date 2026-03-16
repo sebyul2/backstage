@@ -542,41 +542,112 @@ function scanOtherSessionsTalk(): void {
           if (entry.type !== 'assistant' || entry.message?.role !== 'assistant') continue;
           if (!entry.message?.content) continue;
 
+          const msgId = entry.message.id || '';
+          const chapterKey = `other-chapter:${projectName}:${msgId}`;
+          if (msgId && recordedTextHashes.has(chapterKey)) continue;
+
+          const steps: any[] = [];
+          let talkMsg = '';
+          let chapterTitle = '';
+
           for (const block of entry.message.content) {
-            if (block.type !== 'text' || !block.text) continue;
-            const text = block.text.trim();
-            if (text.length < 10 || text.length > 2000) continue;
-            if (text.startsWith('<') || text.startsWith('{') || text.startsWith('```')) continue;
+            // Thinking → 작업 노트 steps
+            if (block.type === 'thinking' && block.thinking) {
+              const thinking = block.thinking.trim();
+              if (thinking.length < 30) continue;
+              const meaningful = thinking.split('\n')
+                .map((l: string) => l.trim())
+                .filter((l: string) => l.length > 10)
+                .filter((l: string) => !l.startsWith('<') && !l.startsWith('{') && !l.startsWith('```'))
+                .filter((l: string) => !l.startsWith('//') && !l.startsWith('#') && !l.startsWith('|'))
+                .filter((l: string) => !/^(import|const|let|var|function|class|if|for|return|export)\b/.test(l))
+                .filter((l: string) => /[\uAC00-\uD7AF]/.test(l));
+              if (meaningful.length > 0) {
+                if (!chapterTitle) {
+                  const t0 = meaningful[0].replace(/\*\*/g, '').replace(/`/g, '').trim();
+                  chapterTitle = t0.length > 25 ? t0.slice(0, 25) + '…' : t0;
+                }
+                const thinkLines = meaningful.slice(0, 10).map((l: string) => {
+                  let tl = l.replace(/\*\*/g, '').replace(/`/g, '').replace(/^[-*]\s+/, '');
+                  return tl.length > 300 ? tl.slice(0, 297) + '...' : tl;
+                });
+                steps.push({ type: 'think', lines: thinkLines });
+              }
+            }
 
-            const meaningful = text.split('\n')
-              .map((l: string) => l.trim())
-              .filter((l: string) => l.length > 10 && l.length < 200)
-              .filter((l: string) => !l.startsWith('|') && !l.startsWith('```') && !l.startsWith('#') && !l.startsWith('- '))
-              .filter((l: string) => !/^(import|const|let|var|function|class|if|for|return|export)\b/.test(l));
+            // Tool use → 작업 노트 steps
+            if (block.type === 'tool_use') {
+              const toolName = block.name || '';
+              const input = block.input as any;
+              if (toolName === 'Agent' || toolName === 'Task') {
+                if (input?.subagent_type) {
+                  const agentType = String(input.subagent_type).replace(/^oh-my-claudecode:/, '');
+                  steps.push({ type: 'agent', name: agentType, desc: (input.description || '').slice(0, 80) });
+                }
+              } else if (toolName) {
+                const fp = input?.file_path || input?.path || '';
+                const basename = typeof fp === 'string' && fp.length > 0 ? (fp.split('/').pop() || fp) : '';
+                steps.push({ type: 'tool', name: toolName, detail: basename });
+              }
+            }
 
-            if (meaningful.length === 0) continue;
+            // Text → talk + 작업 노트 response
+            if (block.type === 'text' && block.text) {
+              const text = block.text.trim();
+              if (text.length < 10 || text.length > 2000) continue;
+              if (text.startsWith('<') || text.startsWith('{') || text.startsWith('```')) continue;
 
-            let msg = meaningful[0];
-            if (msg.length > 100) msg = msg.slice(0, 97) + '...';
+              const meaningful = text.split('\n')
+                .map((l: string) => l.trim())
+                .filter((l: string) => l.length > 10 && l.length < 200)
+                .filter((l: string) => !l.startsWith('|') && !l.startsWith('```') && !l.startsWith('#') && !l.startsWith('- '))
+                .filter((l: string) => !/^(import|const|let|var|function|class|if|for|return|export)\b/.test(l));
 
-            // 중복 체크
-            const hash = `other:${projectName}:${msg.slice(0, 80)}`;
-            if (recordedTextHashes.has(hash)) continue;
-            recordedTextHashes.add(hash);
+              if (meaningful.length > 0) {
+                let msg = meaningful[0];
+                if (msg.length > 100) msg = msg.slice(0, 97) + '...';
+                if (!talkMsg) talkMsg = msg;
+                steps.push({ type: 'response', text: msg });
+              }
+            }
+          }
 
-            // history에 기록 (프로젝트명 프리픽스로 세션 구분)
-            const histEntry = JSON.stringify({
+          // Talk 기록 (기존 history.jsonl — 말풍선용)
+          if (talkMsg) {
+            const hash = `other:${projectName}:${talkMsg.slice(0, 80)}`;
+            if (!recordedTextHashes.has(hash)) {
+              recordedTextHashes.add(hash);
+              const histEntry = JSON.stringify({
+                ts: new Date().toTimeString().slice(0, 8),
+                epoch: nowEpoch,
+                type: 'talk',
+                speaker: 'Chris',
+                role: 'boss',
+                msg: `[${projectName}] ${talkMsg}`,
+                project: projectName,
+              });
+              ensureHistoryFile();
+              try { fs.appendFileSync(HISTORY_FILE, histEntry + '\n'); } catch {}
+            }
+          }
+
+          // Chapter 기록 (chris-log.jsonl — 작업 노트용)
+          if (steps.length > 0 && msgId) {
+            recordedTextHashes.add(chapterKey);
+            if (!chapterTitle) {
+              chapterTitle = talkMsg
+                ? (talkMsg.length > 25 ? talkMsg.slice(0, 25) + '…' : talkMsg)
+                : `[${projectName}]`;
+            }
+            const chapterEntry = JSON.stringify({
               ts: new Date().toTimeString().slice(0, 8),
               epoch: nowEpoch,
-              type: 'talk',
-              speaker: 'Chris',
-              role: 'boss',
-              msg: `[${projectName}] ${msg}`,
+              title: `[${projectName}] ${chapterTitle}`,
+              userMsg: '',
+              steps,
               project: projectName,
             });
-            ensureHistoryFile();
-            try { fs.appendFileSync(HISTORY_FILE, histEntry + '\n'); } catch {}
-            break; // assistant 블록에서 하나만
+            try { fs.appendFileSync(CHRIS_LOG_FILE, chapterEntry + '\n'); } catch {}
           }
         } catch {}
       }

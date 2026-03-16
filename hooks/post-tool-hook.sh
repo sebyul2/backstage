@@ -287,13 +287,13 @@ case "$tool_name" in
         ;;
 esac
 
-# ── C-Team AI 대화 + 데이터 (최소 20초 간격, 각 도구 담당 캐릭터가 대화) ──
+# ── C-Team AI 대화 + 데이터 (최소 30초 간격, 각 도구 담당 캐릭터가 대화) ──
 C_BUBBLE_LAST_FILE="$PLUGIN_DIR/c-bubble-last-epoch.txt"
-C_BUBBLE_INTERVAL=20
+C_BUBBLE_INTERVAL=30
 
 case "$tool_name" in
     Read|Edit|Grep|Glob|Write|Bash)
-        # 시간 기반 간격: 마지막 c-bubble 이후 20초 이상이면 트리거
+        # 시간 기반 간격: 마지막 c-bubble 이후 30초 이상이면 트리거
         now_epoch=$(date '+%s')
         last_bubble_epoch=0
         [ -f "$C_BUBBLE_LAST_FILE" ] && last_bubble_epoch=$(cat "$C_BUBBLE_LAST_FILE" 2>/dev/null)
