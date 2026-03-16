@@ -2175,7 +2175,7 @@ async function processDialogueQueue(): Promise<void> {
 
       try {
         // claude -p (중첩 세션 감지 환경변수 모두 제거)
-        // stdin 파이프로 프롬프트 전달 (인자 방식은 MCP 초기화 대기로 hang됨)
+        // --system-prompt로 전역 CLAUDE.md/플러그인 간섭 방지 (이게 없으면 empty output 발생)
         const cleanEnv = { ...process.env, BACKSTAGE_DIALOGUE: '1' };
         delete cleanEnv.CLAUDECODE;
         delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
@@ -2183,7 +2183,8 @@ async function processDialogueQueue(): Promise<void> {
 
         // BACKSTAGE_DIALOGUE=1 환경변수로 hook 재귀 방지 (user-prompt-hook.sh에서 체크)
         // stdin으로 프롬프트 전달: Blob을 사용해 Bun이 자동으로 파이프+닫기 처리
-        const proc = Bun.spawn(['claude', '-p', '--model', 'haiku', '--no-session-persistence'], {
+        const dialogueSystemPrompt = 'You are a dialogue generator for an IT startup office pixel art viewer. Output ONLY valid JSON with no markdown fences, no explanation. Format: {"lines":[{"speaker":"boss"|"agent","msg":"..."}]}';
+        const proc = Bun.spawn(['claude', '-p', '--model', 'haiku', '--no-session-persistence', '--system-prompt', dialogueSystemPrompt], {
           stdin: new Blob([fullPrompt]),
           stdout: 'pipe',
           stderr: 'pipe',
