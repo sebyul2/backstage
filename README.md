@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="#installation">Installation</a> •
+  <a href="#installation-scope">Scope</a> •
   <a href="#features">Features</a> •
   <a href="#how-it-works">How It Works</a> •
   <a href="#characters">Characters</a> •
@@ -76,6 +77,43 @@ claude plugin uninstall backstage
 ```
 
 Removes all plugin files, hooks, cache, and configuration cleanly. No leftovers.
+
+### Installation Scope
+
+Backstage hooks can run **globally** (all projects) or **locally** (single project), depending on how you install:
+
+| Install Method | Scope | Hooks Run In |
+|----------------|-------|--------------|
+| `claude plugin install` | **Global** | Every Claude Code session, all projects |
+| `./install.sh` (manual) | **Local** | Only the workspace where you installed |
+
+#### Global Install (Recommended)
+
+```bash
+claude plugin install backstage
+```
+
+- Hooks are registered in `~/.claude/plugins/installed_plugins.json` with `scope: "user"`
+- The plugin system injects `${CLAUDE_PLUGIN_ROOT}` at runtime — no hardcoded paths
+- Works across all projects automatically
+- **Uninstall:** `claude plugin uninstall backstage` cleanly removes everything
+
+#### Local Install
+
+```bash
+./install.sh
+```
+
+- Hooks are registered in your workspace's `.claude/settings.local.json`
+- Only active when Claude Code runs inside that workspace
+- Other projects are **not affected**
+- **Uninstall:** `./uninstall.sh` removes plugin files + hook entries from settings
+
+#### Multi-Session Support (v0.5.0+)
+
+Running multiple Claude Code sessions in split panes (e.g., iTerm2)?
+
+One `localhost:7777` viewer collects activity from **all active sessions** automatically. Each session's work appears with a `[project-name]` prefix in the chat panel — no extra configuration needed.
 
 ---
 
