@@ -521,7 +521,9 @@ function scanOtherSessionsTalk(): void {
       } catch { continue; }
 
       if (!newest) continue;
-      if (newest.path === transcriptPath) continue; // 메인 세션 제외
+      // 메인 세션 제외: 같은 파일 또는 같은 프로젝트 디렉토리
+      if (newest.path === transcriptPath) continue;
+      if (transcriptPath && path.dirname(newest.path) === path.dirname(transcriptPath)) continue;
       // 모든 프로젝트의 transcript를 수집 (활성도 조건 없음)
 
       const tp = newest.path;
@@ -706,12 +708,12 @@ function scanOtherSessionsTalk(): void {
             if (!chapterTitle) {
               chapterTitle = talkMsg
                 ? (talkMsg.length > 25 ? talkMsg.slice(0, 25) + '…' : talkMsg)
-                : `[${projectName}]`;
+                : '';
             }
             const chapterEntry = JSON.stringify({
               ts: new Date().toTimeString().slice(0, 8),
               epoch: nowEpoch,
-              title: `[${projectName}] ${chapterTitle}`,
+              title: chapterTitle ? `[${projectName}] ${chapterTitle}` : `[${projectName}]`,
               userMsg: currentUserMsg ? `[${projectName}] ${currentUserMsg}` : '',
               steps,
               project: projectName,
