@@ -26,6 +26,22 @@ const HISTORY_FILE =
 
 const CHRIS_LOG_FILE = path.join(PLUGIN_DIR, "chris-log.jsonl");
 const DIALOGUE_QUEUE_FILE = path.join(PLUGIN_DIR, "dialogue-queue.jsonl");
+const IMAGES_DIR = path.join(PLUGIN_DIR, "images");
+
+// 이미지 저장: base64 → 파일, 파일명 반환
+function saveImage(base64Data: string, mediaType: string): string | null {
+  try {
+    if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
+    const ext = mediaType.includes('png') ? 'png' : mediaType.includes('gif') ? 'gif' : 'jpg';
+    const hash = Bun.hash(base64Data.slice(0, 200)).toString(36);
+    const filename = `${hash}.${ext}`;
+    const filepath = path.join(IMAGES_DIR, filename);
+    if (!fs.existsSync(filepath)) {
+      fs.writeFileSync(filepath, Buffer.from(base64Data, 'base64'));
+    }
+    return filename;
+  } catch { return null; }
+}
 
 const CHARACTERS_FILE = (() => {
   const local = path.join(import.meta.dir, "../hooks/characters.json");
@@ -341,6 +357,7 @@ let usageData = {
   cacheReadTokens: 0,
   contextWindow: 0,      // estimated from preTokens on compact
   lastTurnContext: 0,     // last turn's input+cache_read (current context size)
+  maxContext: 200000,     // 모델별 컨텍스트 제한 (opus-4-6/sonnet-4-6: 1M, 그 외: 200K)
   lastEmitTime: 0,
   fiveHourPercent: null as number | null,
   sevenDayPercent: null as number | null,
@@ -409,6 +426,10 @@ const thinkQueue: string[] = [];
 
 // 멀티 세션: 다른 활성 Claude 세션의 transcript 추적
 const otherTranscriptOffsets: Map<string, number> = new Map();
+// 다른 세션의 마지막 user 메시지 (프로젝트별, 스캔 간 유지)
+const otherSessionUserMsg: Map<string, string> = new Map();
+// 현재 세션의 이미지 (스캔 간 유지)
+let chapterImages: string[] = [];
 
 // 실행 중인 claude 프로세스의 cwd 목록 (ps + lsof 기반, 주기적 갱신)
 const activeClaudeCwds = new Set<string>();
@@ -580,7 +601,7 @@ function scanOtherSessionsTalk(): void {
         return '';
       };
 
-      let currentUserMsg = '';
+      let currentUserMsg = otherSessionUserMsg.get(projectName) || '';
       const mergedEntries: { userMsg: string; msgId: string; content: any[] }[] = [];
       const msgIdToIdx: Record<string, number> = {};
 
@@ -594,12 +615,12 @@ function scanOtherSessionsTalk(): void {
             if (Array.isArray(content) && content.every((b: any) => b.type === 'tool_result')) continue;
             if (typeof content === 'string') {
               const msg = extractUserMsg(content.trim());
-              if (msg) currentUserMsg = msg;
+              if (msg) { currentUserMsg = msg; otherSessionUserMsg.set(projectName, msg); }
             } else if (Array.isArray(content)) {
               for (const block of content) {
                 if (block.type === 'text' && block.text) {
                   const msg = extractUserMsg(block.text.trim());
-                  if (msg) { currentUserMsg = msg; break; }
+                  if (msg) { currentUserMsg = msg; otherSessionUserMsg.set(projectName, msg); break; }
                 }
               }
             }
@@ -974,6 +995,15 @@ function scanTranscriptForAgentWork(): void {
           }
         }
       }
+      // 모델명에서 maxContext 결정 (opus/sonnet 4.6+ → 1M, 그 외 → 200K)
+      if (entry.type === 'assistant' && entry.message?.model) {
+        const modelMatch = entry.message.model.match(/claude-(opus|sonnet)-(\d+)-(\d+)/);
+        if (modelMatch) {
+          const [, , major, minor] = modelMatch;
+          const ver = parseInt(major) * 10 + parseInt(minor);
+          usageData.maxContext = ver >= 46 ? 1_000_000 : 200_000;
+        }
+      }
       // Usage tracking from assistant messages
       if (entry.type === 'assistant' && entry.message?.usage) {
         const u = entry.message.usage;
@@ -1206,6 +1236,7 @@ function scanTranscriptForAgentWork(): void {
         cacheReadTokens: usageData.cacheReadTokens,
         contextWindow: usageData.contextWindow,
         lastTurnContext: usageData.lastTurnContext,
+        maxContext: usageData.maxContext,
         fiveHourPercent: usageData.fiveHourPercent,
         sevenDayPercent: usageData.sevenDayPercent,
       }
@@ -1431,26 +1462,58 @@ function scanTranscriptForAgentWork(): void {
     /^Tool(s)? (loaded|not found|found)/.test(t) || t === 'No tools';
 
   // 전처리: 같은 msgId의 streaming 분할 entry를 하나로 합치기
-  const mergedEntries: { userMsg?: string; msgId: string; content: any[] }[] = [];
+  const mergedEntries: { userMsg?: string; images?: string[]; msgId: string; content: any[] }[] = [];
   const msgIdToIdx: Record<string, number> = {};
   for (const line of lines) {
     try {
       const entry = JSON.parse(line);
       if (entry.type === "user" && entry.message?.role === "user" && entry.message?.content) {
+        // 이미지 초기화: 실제 사용자 메시지가 바뀔 때만 (같은 메시지의 string/list 연속 entry 대응)
+        const prevUserMsg = chapterUserMsg;
         // content가 string인 경우 (Claude Code transcript 포맷)
         if (typeof entry.message.content === 'string') {
           const raw = entry.message.content.trim();
           // system-reminder 등 제거
           const cleaned = raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
-          if (cleaned.length > 0 && !cleaned.startsWith('<') && !cleaned.startsWith('{') && !isHookDialogue(cleaned)) {
-            chapterUserMsg = cleaned.slice(0, 500);
+          // [Image: source: /path/to/file] 패턴에서 이미지 경로 추출 → 파일 복사
+          const imgMatches = cleaned.matchAll(/\[Image:\s*source:\s*([^\]]+)\]/g);
+          for (const m of imgMatches) {
+            const imgPath = m[1].trim();
+            try {
+              if (fs.existsSync(imgPath)) {
+                if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
+                const ext = path.extname(imgPath).slice(1) || 'png';
+                const hash = Bun.hash(imgPath).toString(36);
+                const filename = `${hash}.${ext}`;
+                const dest = path.join(IMAGES_DIR, filename);
+                if (!fs.existsSync(dest)) fs.copyFileSync(imgPath, dest);
+                chapterImages.push(filename);
+              }
+            } catch {}
           }
-        } else {
+          // userMsg에서 [Image: source:...] 제거
+          const textOnly = cleaned.replace(/\[Image:\s*source:\s*[^\]]+\]/g, '').trim();
+          if (textOnly.length > 0 && !textOnly.startsWith('<') && !textOnly.startsWith('{') && !isHookDialogue(textOnly)) {
+            chapterUserMsg = textOnly.slice(0, 500);
+            lastUserMessage = chapterUserMsg; // 모듈 스코프에도 반영 (스캔 간 유지)
+          }
+        } else if (Array.isArray(entry.message.content)) {
           for (const block of entry.message.content) {
             if (block.type === "text" && block.text) {
               const raw = block.text.trim();
               const cleaned = raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
-              if (cleaned.length > 0 && !isHookDialogue(cleaned)) { chapterUserMsg = cleaned.slice(0, 500); break; }
+              if (cleaned.length > 0 && !isHookDialogue(cleaned)) {
+                chapterUserMsg = cleaned.slice(0, 500);
+                lastUserMessage = chapterUserMsg; // 모듈 스코프에도 반영
+                break;
+              }
+            }
+          }
+          // 이미지 블록 추출 → 파일로 저장
+          for (const block of entry.message.content) {
+            if (block.type === 'image' && block.source?.type === 'base64' && block.source?.data) {
+              const filename = saveImage(block.source.data, block.source.media_type || 'image/png');
+              if (filename) chapterImages.push(filename);
             }
           }
         }
@@ -1467,7 +1530,8 @@ function scanTranscriptForAgentWork(): void {
         mergedEntries[msgIdToIdx[msgId]].content.push(...blocks);
       } else {
         msgIdToIdx[msgId] = mergedEntries.length;
-        mergedEntries.push({ userMsg: chapterUserMsg, msgId, content: blocks });
+        mergedEntries.push({ userMsg: chapterUserMsg, images: chapterImages.length > 0 ? [...chapterImages] : undefined, msgId, content: blocks });
+        chapterImages = []; // assistant push 후 초기화
       }
     } catch {}
   }
@@ -1656,6 +1720,7 @@ function scanTranscriptForAgentWork(): void {
         userMsg: chapterUserMsg,
         steps,
         project: currentProjectName,
+        ...(merged.images?.length ? { images: merged.images } : {}),
       });
 
       try { fs.appendFileSync(CHRIS_LOG_FILE, chapterEntry + '\n'); } catch {}
@@ -2306,6 +2371,24 @@ const server = Bun.serve({
         });
       // /generate-dialogue 제거됨 — Hook → dialogue-generator Task 파이프라인으로 대체
       default: {
+        // /images/{filename} — 저장된 스크린샷/이미지 서빙
+        if (url.pathname.startsWith("/images/")) {
+          const filename = decodeURIComponent(url.pathname.slice(8));
+          if (filename.includes('..') || filename.includes('/')) {
+            return new Response("Not found", { status: 404 });
+          }
+          const filepath = path.join(IMAGES_DIR, filename);
+          try {
+            const file = Bun.file(filepath);
+            if (await file.exists()) {
+              const ext = filename.split('.').pop() || 'png';
+              const mime = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : 'image/jpeg';
+              return new Response(file, { headers: { ...CORS_HEADERS, "Content-Type": mime, "Cache-Control": "public, max-age=86400" } });
+            }
+          } catch {}
+          return new Response("Not found", { status: 404, headers: CORS_HEADERS });
+        }
+
         // /plan/:filename — 특정 plan 파일 상세 반환
         if (url.pathname.startsWith("/plan/")) {
           try {

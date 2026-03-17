@@ -1469,7 +1469,7 @@ export class Renderer {
     const statsText = `Active: ${stats.active}/${stats.total}  Idle: ${stats.idle}  Done: ${stats.tasksCompleted}${cTeamText}`;
 
     // CTX 프로그레스바 수치 계산 (현재 컨텍스트 윈도우 크기)
-    const maxCtx = 200000;
+    const maxCtx = ctxData.maxContext || 200000;
     const ctxData = this._dashboardData && this._dashboardData.usage ? this._dashboardData.usage : {};
     const ctxUsed = ctxData.lastTurnContext || ctxData.contextWindow || 0;
     const fillRatio = Math.min(1, ctxUsed / maxCtx);

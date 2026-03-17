@@ -558,6 +558,7 @@ function handleUsageUpdate(entry) {
     cacheReadTokens: entry.data.cacheReadTokens || 0,
     contextWindow: entry.data.contextWindow || 0,
     lastTurnContext: entry.data.lastTurnContext || 0,
+    maxContext: entry.data.maxContext || 200000,
     fiveHourPercent: entry.data.fiveHourPercent ?? null,
     sevenDayPercent: entry.data.sevenDayPercent ?? null,
   };
@@ -1466,7 +1467,9 @@ async function showChrisLogPopup() {
         continue;
       }
       const project = ch.project || 'main';
-      const msg = ch.userMsg || ch.title || (window.i18n?.ui?.untitled || '(Untitled)');
+      // [Image: source:...] 패턴 제거 (이미지는 썸네일로 별도 표시)
+      const cleanMsg = (s) => (s || '').replace(/\[Image:\s*source:\s*[^\]]+\]/g, '').trim();
+      const msg = cleanMsg(ch.userMsg) || cleanMsg(ch.title) || (window.i18n?.ui?.untitled || '(Untitled)');
       const key = project + ':' + msg;
       if (!currentGroup || currentGroup._key !== key) {
         currentGroup = { _key: key, userMsg: msg, project, ts: ch.ts, chapters: [ch] };
@@ -1593,6 +1596,46 @@ async function showChrisLogPopup() {
         transition: isOpen ? 'none' : 'max-height 0.3s ease',
         background: '#0F1A33',
       });
+
+      // 이미지 썸네일 표시 (첫 챕터의 images 사용)
+      const allImages = grp.chapters.flatMap(ch => ch.images || []);
+      if (allImages.length > 0) {
+        const imgRow = document.createElement('div');
+        Object.assign(imgRow.style, {
+          padding: '6px 12px', display: 'flex', gap: '6px', flexWrap: 'wrap',
+          background: '#0F1A33', borderTop: '1px solid #29ADFF20',
+        });
+        for (const img of allImages) {
+          const thumb = document.createElement('img');
+          thumb.src = '/images/' + img;
+          Object.assign(thumb.style, {
+            width: '40px', height: '40px', objectFit: 'cover',
+            borderRadius: '4px', cursor: 'pointer', border: '1px solid #29ADFF40',
+          });
+          thumb.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            // 모달로 크게 표시
+            const modal = document.createElement('div');
+            Object.assign(modal.style, {
+              position: 'fixed', top: '0', left: '0', right: '0', bottom: '0',
+              background: 'rgba(0,0,0,0.85)', zIndex: '20000',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer',
+            });
+            const fullImg = document.createElement('img');
+            fullImg.src = '/images/' + img;
+            Object.assign(fullImg.style, {
+              maxWidth: '90vw', maxHeight: '90vh', borderRadius: '8px',
+              boxShadow: '0 0 40px rgba(0,0,0,0.8)',
+            });
+            modal.appendChild(fullImg);
+            modal.addEventListener('click', () => modal.remove());
+            document.body.appendChild(modal);
+          });
+          imgRow.appendChild(thumb);
+        }
+        groupBody.appendChild(imgRow);
+      }
 
       // 각 챕터 내용을 바로 펼쳐서 표시
       grp.chapters.forEach((ch, idx) => {
