@@ -1529,8 +1529,8 @@ async function showChrisLogPopup() {
       const groupHeader = document.createElement('div');
       Object.assign(groupHeader.style, {
         padding: '9px 12px',
-        background: grp.project && grp.project !== 'main' ? '#1A1A2E' : '#1A1A2E',
-        borderLeft: '3px solid ' + (grp.project && grp.project !== 'main' ? '#29ADFF' : '#FF77A8'),
+        background: '#1A1A2E',
+        borderLeft: '3px solid #FF77A8',
         cursor: 'pointer',
         display: 'flex',
         justifyContent: 'space-between',
@@ -1542,8 +1542,8 @@ async function showChrisLogPopup() {
       groupTitle.style.flex = '1';
       groupTitle.style.overflow = isOpen ? 'visible' : 'hidden';
 
-      // 프로젝트 뱃지 (다른 프로젝트일 때만 표시)
-      if (grp.project && grp.project !== 'main') {
+      // 프로젝트 뱃지 (모든 그룹에 표시)
+      if (grp.project) {
         const badge = document.createElement('span');
         badge.textContent = grp.project;
         Object.assign(badge.style, {
@@ -1802,17 +1802,17 @@ async function showChrisLogPopup() {
           groupBody.style.maxHeight = 'none';
           groupBody.style.transition = 'none';
           groupArrow.style.transform = 'rotate(90deg)';
-          groupTitle.textContent = '👤 ' + grp.userMsg;
-          groupTitle.style.whiteSpace = 'pre-wrap';
+          msgText.textContent = '👤 ' + grp.userMsg;
+          msgText.style.whiteSpace = 'pre-wrap';
+          msgText.style.wordBreak = 'break-word';
           groupTitle.style.overflow = 'visible';
-          groupTitle.style.wordBreak = 'break-word';
         } else {
           groupBody.style.overflow = 'hidden';
           groupBody.style.transition = 'max-height 0.3s ease';
           groupBody.style.maxHeight = '0';
           groupArrow.style.transform = 'rotate(0deg)';
-          groupTitle.textContent = '👤 ' + shortMsg;
-          groupTitle.style.whiteSpace = 'nowrap';
+          msgText.textContent = '👤 ' + shortMsg;
+          msgText.style.whiteSpace = 'nowrap';
           groupTitle.style.overflow = 'hidden';
         }
       };

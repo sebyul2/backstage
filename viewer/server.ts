@@ -1645,12 +1645,17 @@ function scanTranscriptForAgentWork(): void {
 
       // 새 챕터 생성
       lastChapterUserMsg = chapterUserMsg;
+      // 현재 세션의 프로젝트명 추출
+      const currentProjectName = transcriptPath
+        ? resolveProjectName(path.basename(path.dirname(transcriptPath)))
+        : 'main';
       const chapterEntry = JSON.stringify({
         ts: new Date().toTimeString().slice(0, 8),
         epoch: nowEpoch,
         title: chapterTitle,
         userMsg: chapterUserMsg,
         steps,
+        project: currentProjectName,
       });
 
       try { fs.appendFileSync(CHRIS_LOG_FILE, chapterEntry + '\n'); } catch {}
