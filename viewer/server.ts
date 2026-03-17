@@ -410,6 +410,28 @@ const thinkQueue: string[] = [];
 // 멀티 세션: 다른 활성 Claude 세션의 transcript 추적
 const otherTranscriptOffsets: Map<string, number> = new Map();
 
+// 실행 중인 claude 프로세스의 cwd 목록 (ps + lsof 기반, 주기적 갱신)
+const activeClaudeCwds = new Set<string>();
+function refreshActiveClaudeSessions(): void {
+  try {
+    const result = Bun.spawnSync(['bash', '-c',
+      `ps -eo pid,comm | grep '[c]laude$' | awk '{print $1}' | while read pid; do lsof -p "$pid" 2>/dev/null | awk '/cwd/{print $NF}'; done`
+    ]);
+    const output = result.stdout.toString().trim();
+    activeClaudeCwds.clear();
+    if (output) {
+      for (const line of output.split('\n')) {
+        const cwd = line.trim();
+        if (cwd) activeClaudeCwds.add(cwd);
+      }
+    }
+    if (activeClaudeCwds.size > 0) {
+      console.log(`[multi-session] active claude sessions: ${[...activeClaudeCwds].map(c => c.split('/').pop()).join(', ')}`);
+    }
+  } catch {}
+}
+refreshActiveClaudeSessions(); // 서버 시작 시 즉시 1회 실행
+
 // Thinking cache: msgId → thinking content (survives transcript redaction)
 const thinkingCache = new Map<string, string>();
 let transcriptWatcher: fs.FSWatcher | null = null;
@@ -509,10 +531,18 @@ function scanOtherSessionsTalk(): void {
       let stat: fs.Stats;
       try { stat = fs.statSync(tp); } catch { continue; }
 
-      // 첫 등장 시 현재 크기부터 시작 (과거 기록은 무시)
+      // 첫 등장: 실행 중인 세션이면 최근 128KB부터 수집, 아니면 과거 무시
       if (!otherTranscriptOffsets.has(tp)) {
-        otherTranscriptOffsets.set(tp, stat.size);
-        continue;
+        const encodedCwd = dir;
+        const isRunning = [...activeClaudeCwds].some(cwd =>
+          cwd.replace(/\//g, '-') === encodedCwd
+        );
+        if (isRunning && stat.size > 128 * 1024) {
+          otherTranscriptOffsets.set(tp, stat.size - 128 * 1024);
+        } else {
+          otherTranscriptOffsets.set(tp, stat.size);
+          if (!isRunning) continue;
+        }
       }
 
       const currentOffset = otherTranscriptOffsets.get(tp)!;
@@ -2514,6 +2544,11 @@ const dialogueQueueTimer = setInterval(() => {
   processDialogueQueue().catch(() => {});
 }, 3000);
 
+// 실행 중인 claude 프로세스 목록 갱신: 30초마다
+const claudeSessionTimer = setInterval(() => {
+  refreshActiveClaudeSessions();
+}, 30_000);
+
 // ─── Auto-shutdown: no SSE listeners for 10 minutes ──────────
 let lastListenerTime = Date.now();
 const IDLE_SHUTDOWN_MS = 10 * 60 * 1000; // 10 minutes
@@ -2536,6 +2571,7 @@ function shutdown(): void {
   clearInterval(idleChatTimer);
   clearInterval(cTeamTimer);
   clearInterval(dialogueQueueTimer);
+  clearInterval(claudeSessionTimer);
   clearInterval(idleCheckTimer);
   for (const conn of activeConnections) {
     conn.close();
