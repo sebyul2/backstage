@@ -1465,9 +1465,11 @@ async function showChrisLogPopup() {
         currentGroup = null;
         continue;
       }
-      const key = ch.userMsg || ch.title || (window.i18n?.ui?.untitled || '(Untitled)');
-      if (!currentGroup || currentGroup.userMsg !== key) {
-        currentGroup = { userMsg: key, ts: ch.ts, chapters: [ch] };
+      const project = ch.project || 'main';
+      const msg = ch.userMsg || ch.title || (window.i18n?.ui?.untitled || '(Untitled)');
+      const key = project + ':' + msg;
+      if (!currentGroup || currentGroup._key !== key) {
+        currentGroup = { _key: key, userMsg: msg, project, ts: ch.ts, chapters: [ch] };
         groups.push(currentGroup);
       } else {
         currentGroup.chapters.push(ch);
@@ -1527,8 +1529,8 @@ async function showChrisLogPopup() {
       const groupHeader = document.createElement('div');
       Object.assign(groupHeader.style, {
         padding: '9px 12px',
-        background: '#1A1A2E',
-        borderLeft: '3px solid #FF77A8',
+        background: grp.project && grp.project !== 'main' ? '#1A1A2E' : '#1A1A2E',
+        borderLeft: '3px solid ' + (grp.project && grp.project !== 'main' ? '#29ADFF' : '#FF77A8'),
         cursor: 'pointer',
         display: 'flex',
         justifyContent: 'space-between',
@@ -1537,16 +1539,33 @@ async function showChrisLogPopup() {
       });
 
       const groupTitle = document.createElement('span');
-      const shortMsg = grp.userMsg.split('\n')[0].slice(0, 80);
-      groupTitle.textContent = '👤 ' + (isOpen ? grp.userMsg : shortMsg);
-      Object.assign(groupTitle.style, {
+      groupTitle.style.flex = '1';
+      groupTitle.style.overflow = isOpen ? 'visible' : 'hidden';
+
+      // 프로젝트 뱃지 (다른 프로젝트일 때만 표시)
+      if (grp.project && grp.project !== 'main') {
+        const badge = document.createElement('span');
+        badge.textContent = grp.project;
+        Object.assign(badge.style, {
+          display: 'inline-block',
+          background: '#29ADFF30', color: '#29ADFF', fontSize: '9px',
+          padding: '1px 6px', borderRadius: '3px', marginRight: '6px',
+          verticalAlign: 'middle', fontWeight: 'normal',
+        });
+        groupTitle.appendChild(badge);
+        if (!isOpen) groupTitle.appendChild(document.createElement('br'));
+      }
+
+      const msgText = document.createElement('span');
+      const shortMsg = grp.userMsg.split('\n')[0].slice(0, 120);
+      msgText.textContent = '👤 ' + (isOpen ? grp.userMsg : shortMsg);
+      Object.assign(msgText.style, {
         color: '#FFF1E8', fontSize: '12px', fontWeight: 'bold',
-        flex: '1',
-        overflow: isOpen ? 'visible' : 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: isOpen ? 'pre-wrap' : 'nowrap',
         wordBreak: isOpen ? 'break-word' : 'normal',
       });
+      groupTitle.appendChild(msgText);
 
       const groupMeta = document.createElement('span');
       groupMeta.textContent = (grp.ts || '') + (grp.chapters.length > 1 ? '  ' + grp.chapters.length + (window.i18n?.ui?.count_suffix || '') : '');

@@ -570,27 +570,33 @@ function scanOtherSessionsTalk(): void {
       const tLines = content.trim().split('\n');
       const nowEpoch = Math.floor(Date.now() / 1000);
 
-      // user 메시지 추적 (챕터 제목용)
+      // ─── 2단계 파싱: mergedEntries 방식 (주 세션과 동일) ───
+      // 1단계: user 메시지 추적 + 같은 msgId의 assistant entries 합치기
+      const extractUserMsg = (raw: string): string => {
+        const cleaned = raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+        if (cleaned.length > 0 && cleaned.length < 500 && !cleaned.startsWith('<') && !cleaned.startsWith('{')) {
+          return cleaned.slice(0, 500);
+        }
+        return '';
+      };
+
       let currentUserMsg = '';
+      const mergedEntries: { userMsg: string; msgId: string; content: any[] }[] = [];
+      const msgIdToIdx: Record<string, number> = {};
 
       for (const tLine of tLines) {
         try {
           const entry = JSON.parse(tLine);
 
-          // user 메시지 추적 → 다음 assistant 응답의 챕터 제목으로 사용
+          // user 메시지 추적 (tool_result만 있는 entry는 스킵)
           if (entry.type === 'user' && entry.message?.role === 'user' && entry.message?.content) {
-            const extractUserMsg = (raw: string): string => {
-              const cleaned = raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
-              if (cleaned.length > 0 && cleaned.length < 500 && !cleaned.startsWith('<') && !cleaned.startsWith('{')) {
-                return cleaned.slice(0, 500);
-              }
-              return '';
-            };
-            if (typeof entry.message.content === 'string') {
-              const msg = extractUserMsg(entry.message.content.trim());
+            const content = entry.message.content;
+            if (Array.isArray(content) && content.every((b: any) => b.type === 'tool_result')) continue;
+            if (typeof content === 'string') {
+              const msg = extractUserMsg(content.trim());
               if (msg) currentUserMsg = msg;
-            } else if (Array.isArray(entry.message.content)) {
-              for (const block of entry.message.content) {
+            } else if (Array.isArray(content)) {
+              for (const block of content) {
                 if (block.type === 'text' && block.text) {
                   const msg = extractUserMsg(block.text.trim());
                   if (msg) { currentUserMsg = msg; break; }
@@ -602,27 +608,40 @@ function scanOtherSessionsTalk(): void {
 
           if (entry.type !== 'assistant' || entry.message?.role !== 'assistant') continue;
           if (!entry.message?.content) continue;
-
           const msgId = entry.message.id || '';
-          const chapterKey = `other-chapter:${projectName}:${msgId}`;
-          if (msgId && recordedTextHashes.has(chapterKey)) continue;
+          if (!msgId) continue;
+          const blocks = Array.isArray(entry.message.content) ? entry.message.content : [];
+          if (msgId in msgIdToIdx) {
+            mergedEntries[msgIdToIdx[msgId]].content.push(...blocks);
+          } else {
+            msgIdToIdx[msgId] = mergedEntries.length;
+            mergedEntries.push({ userMsg: currentUserMsg, msgId, content: blocks });
+          }
+        } catch {}
+      }
 
+      // 2단계: merged entries에서 chapter 생성
+      let lastOtherUserMsg = '';
+      for (const merged of mergedEntries) {
+        try {
+          const msgId = merged.msgId;
+          const chapterKey = `other-chapter:${projectName}:${msgId}`;
+          if (recordedTextHashes.has(chapterKey)) continue;
+
+          const userMsg = merged.userMsg;
           const steps: any[] = [];
           let talkMsg = '';
           let chapterTitle = '';
 
-          // 사용자 메시지 기반 챕터 제목 (현재 세션과 동일한 방식)
-          if (currentUserMsg) {
-            let line = currentUserMsg.trim();
-            line = line.replace(/^\d+[\.\)]\s*/, '');
+          // 사용자 메시지 기반 챕터 제목
+          if (userMsg) {
+            let line = userMsg.trim().replace(/^\d+[\.\)]\s*/, '');
             line = line.replace(/[.。!！?？…~]+$/g, '')
-              .replace(/\s*(해\s*줘|해주세요|하세요|해봐|부탁|좀|할\s*것|하기)\s*$/g, '')
-              .trim();
-            chapterTitle = line.length > 40 ? line.slice(0, 40) + '…' : (line || '');
+              .replace(/\s*(해\s*줘|해주세요|하세요|해봐|부탁|좀|할\s*것|하기)\s*$/g, '').trim();
+            chapterTitle = line.length > 60 ? line.slice(0, 60) + '…' : (line || '');
           }
 
-          for (const block of entry.message.content) {
-            // Thinking → 작업 노트 steps
+          for (const block of merged.content) {
             if (block.type === 'thinking' && block.thinking) {
               const thinking = block.thinking.trim();
               if (thinking.length < 30) continue;
@@ -636,7 +655,7 @@ function scanOtherSessionsTalk(): void {
               if (meaningful.length > 0) {
                 if (!chapterTitle) {
                   const t0 = meaningful[0].replace(/\*\*/g, '').replace(/`/g, '').trim();
-                  chapterTitle = t0.length > 25 ? t0.slice(0, 25) + '…' : t0;
+                  chapterTitle = t0.length > 40 ? t0.slice(0, 40) + '…' : t0;
                 }
                 const thinkLines = meaningful.slice(0, 10).map((l: string) => {
                   let tl = l.replace(/\*\*/g, '').replace(/`/g, '').replace(/^[-*]\s+/, '');
@@ -645,35 +664,27 @@ function scanOtherSessionsTalk(): void {
                 steps.push({ type: 'think', lines: thinkLines });
               }
             }
-
-            // Tool use → 작업 노트 steps
             if (block.type === 'tool_use') {
               const toolName = block.name || '';
               const input = block.input as any;
-              if (toolName === 'Agent' || toolName === 'Task') {
-                if (input?.subagent_type) {
-                  const agentType = String(input.subagent_type).replace(/^oh-my-claudecode:/, '');
-                  steps.push({ type: 'agent', name: agentType, desc: (input.description || '').slice(0, 80) });
-                }
-              } else if (toolName) {
+              if ((toolName === 'Agent' || toolName === 'Task') && input?.subagent_type) {
+                const agentType = String(input.subagent_type).replace(/^oh-my-claudecode:/, '');
+                steps.push({ type: 'agent', name: agentType, desc: (input.description || '').slice(0, 80) });
+              } else if (toolName && toolName !== 'Agent' && toolName !== 'Task') {
                 const fp = input?.file_path || input?.path || '';
                 const basename = typeof fp === 'string' && fp.length > 0 ? (fp.split('/').pop() || fp) : '';
                 steps.push({ type: 'tool', name: toolName, detail: basename });
               }
             }
-
-            // Text → talk + 작업 노트 response
             if (block.type === 'text' && block.text) {
               const text = block.text.trim();
               if (text.length < 10 || text.length > 2000) continue;
               if (text.startsWith('<') || text.startsWith('{') || text.startsWith('```')) continue;
-
               const meaningful = text.split('\n')
                 .map((l: string) => l.trim())
                 .filter((l: string) => l.length > 10 && l.length < 200)
                 .filter((l: string) => !l.startsWith('|') && !l.startsWith('```') && !l.startsWith('#') && !l.startsWith('- '))
                 .filter((l: string) => !/^(import|const|let|var|function|class|if|for|return|export)\b/.test(l));
-
               if (meaningful.length > 0) {
                 let msg = meaningful[0];
                 if (msg.length > 100) msg = msg.slice(0, 97) + '...';
@@ -683,6 +694,9 @@ function scanOtherSessionsTalk(): void {
             }
           }
 
+          if (steps.length === 0) continue;
+          recordedTextHashes.add(chapterKey);
+
           // Talk 기록 (초기 128KB 읽기 시에는 스킵 — chat 폭탄 방지)
           if (talkMsg && !isInitialRead) {
             const hash = `other:${projectName}:${talkMsg.slice(0, 80)}`;
@@ -691,9 +705,7 @@ function scanOtherSessionsTalk(): void {
               const histEntry = JSON.stringify({
                 ts: new Date().toTimeString().slice(0, 8),
                 epoch: nowEpoch,
-                type: 'talk',
-                speaker: 'Chris',
-                role: 'boss',
+                type: 'talk', speaker: 'Chris', role: 'boss',
                 msg: `[${projectName}] ${talkMsg}`,
                 project: projectName,
               });
@@ -702,24 +714,38 @@ function scanOtherSessionsTalk(): void {
             }
           }
 
-          // Chapter 기록 (chris-log.jsonl — 작업 노트용)
-          if (steps.length > 0 && msgId) {
-            recordedTextHashes.add(chapterKey);
-            if (!chapterTitle) {
-              chapterTitle = talkMsg
-                ? (talkMsg.length > 25 ? talkMsg.slice(0, 25) + '…' : talkMsg)
-                : '';
-            }
-            const chapterEntry = JSON.stringify({
-              ts: new Date().toTimeString().slice(0, 8),
-              epoch: nowEpoch,
-              title: chapterTitle ? `[${projectName}] ${chapterTitle}` : `[${projectName}]`,
-              userMsg: currentUserMsg ? `[${projectName}] ${currentUserMsg}` : '',
-              steps,
-              project: projectName,
-            });
-            try { fs.appendFileSync(CHRIS_LOG_FILE, chapterEntry + '\n'); } catch {}
+          // Chapter: 같은 프로젝트+userMsg면 기존 chapter에 merge
+          const shouldMerge = !!userMsg && userMsg === lastOtherUserMsg;
+          if (shouldMerge) {
+            try {
+              const logContent = fs.existsSync(CHRIS_LOG_FILE) ? fs.readFileSync(CHRIS_LOG_FILE, 'utf-8') : '';
+              const logLines = logContent.trim().split('\n').filter(Boolean);
+              if (logLines.length > 0) {
+                const lastEntry = JSON.parse(logLines[logLines.length - 1]);
+                if (lastEntry.project === projectName) {
+                  if (!lastEntry.steps) lastEntry.steps = [];
+                  for (const s of steps) lastEntry.steps.push(s);
+                  lastEntry.ts = new Date().toTimeString().slice(0, 8);
+                  lastEntry.epoch = nowEpoch;
+                  logLines[logLines.length - 1] = JSON.stringify(lastEntry);
+                  fs.writeFileSync(CHRIS_LOG_FILE, logLines.join('\n') + '\n');
+                  continue;
+                }
+              }
+            } catch {}
           }
+
+          lastOtherUserMsg = userMsg;
+          if (!chapterTitle) chapterTitle = '';
+          const chapterEntry = JSON.stringify({
+            ts: new Date().toTimeString().slice(0, 8),
+            epoch: nowEpoch,
+            title: chapterTitle,
+            userMsg: userMsg,
+            steps,
+            project: projectName,
+          });
+          try { fs.appendFileSync(CHRIS_LOG_FILE, chapterEntry + '\n'); } catch {}
         } catch {}
       }
     }
@@ -2072,6 +2098,9 @@ const server = Bun.serve({
         try {
           const content = fs.existsSync(CHRIS_LOG_FILE) ? fs.readFileSync(CHRIS_LOG_FILE, 'utf-8') : '';
           const entries = content.trim().split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+
+          // epoch 기준 정렬 (다른 세션 chapter가 중간에 끼어들어도 시간순 보장)
+          entries.sort((a: any, b: any) => (a.epoch || 0) - (b.epoch || 0));
 
           // 사용자 메시지 실시간 구독: 아직 응답이 없으면 빈 pending 챕터 추가
           if (lastUserMessage) {
