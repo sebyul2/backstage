@@ -532,7 +532,9 @@ function scanOtherSessionsTalk(): void {
       try { stat = fs.statSync(tp); } catch { continue; }
 
       // 첫 등장: 실행 중인 세션이면 최근 128KB부터 수집, 아니면 과거 무시
+      let isInitialRead = false;
       if (!otherTranscriptOffsets.has(tp)) {
+        isInitialRead = true;
         const encodedCwd = dir;
         const isRunning = [...activeClaudeCwds].some(cwd =>
           cwd.replace(/\//g, '-') === encodedCwd
@@ -566,9 +568,36 @@ function scanOtherSessionsTalk(): void {
       const tLines = content.trim().split('\n');
       const nowEpoch = Math.floor(Date.now() / 1000);
 
+      // user 메시지 추적 (챕터 제목용)
+      let currentUserMsg = '';
+
       for (const tLine of tLines) {
         try {
           const entry = JSON.parse(tLine);
+
+          // user 메시지 추적 → 다음 assistant 응답의 챕터 제목으로 사용
+          if (entry.type === 'user' && entry.message?.role === 'user' && entry.message?.content) {
+            const extractUserMsg = (raw: string): string => {
+              const cleaned = raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+              if (cleaned.length > 0 && cleaned.length < 500 && !cleaned.startsWith('<') && !cleaned.startsWith('{')) {
+                return cleaned.slice(0, 500);
+              }
+              return '';
+            };
+            if (typeof entry.message.content === 'string') {
+              const msg = extractUserMsg(entry.message.content.trim());
+              if (msg) currentUserMsg = msg;
+            } else if (Array.isArray(entry.message.content)) {
+              for (const block of entry.message.content) {
+                if (block.type === 'text' && block.text) {
+                  const msg = extractUserMsg(block.text.trim());
+                  if (msg) { currentUserMsg = msg; break; }
+                }
+              }
+            }
+            continue;
+          }
+
           if (entry.type !== 'assistant' || entry.message?.role !== 'assistant') continue;
           if (!entry.message?.content) continue;
 
@@ -579,6 +608,16 @@ function scanOtherSessionsTalk(): void {
           const steps: any[] = [];
           let talkMsg = '';
           let chapterTitle = '';
+
+          // 사용자 메시지 기반 챕터 제목 (현재 세션과 동일한 방식)
+          if (currentUserMsg) {
+            let line = currentUserMsg.trim();
+            line = line.replace(/^\d+[\.\)]\s*/, '');
+            line = line.replace(/[.。!！?？…~]+$/g, '')
+              .replace(/\s*(해\s*줘|해주세요|하세요|해봐|부탁|좀|할\s*것|하기)\s*$/g, '')
+              .trim();
+            chapterTitle = line.length > 40 ? line.slice(0, 40) + '…' : (line || '');
+          }
 
           for (const block of entry.message.content) {
             // Thinking → 작업 노트 steps
@@ -642,8 +681,8 @@ function scanOtherSessionsTalk(): void {
             }
           }
 
-          // Talk 기록 (기존 history.jsonl — 말풍선용)
-          if (talkMsg) {
+          // Talk 기록 (초기 128KB 읽기 시에는 스킵 — chat 폭탄 방지)
+          if (talkMsg && !isInitialRead) {
             const hash = `other:${projectName}:${talkMsg.slice(0, 80)}`;
             if (!recordedTextHashes.has(hash)) {
               recordedTextHashes.add(hash);
@@ -673,7 +712,7 @@ function scanOtherSessionsTalk(): void {
               ts: new Date().toTimeString().slice(0, 8),
               epoch: nowEpoch,
               title: `[${projectName}] ${chapterTitle}`,
-              userMsg: '',
+              userMsg: currentUserMsg ? `[${projectName}] ${currentUserMsg}` : '',
               steps,
               project: projectName,
             });
@@ -1834,19 +1873,19 @@ function handleHistory(): Response {
   const content = fs.readFileSync(HISTORY_FILE, "utf-8");
   const allLines = content.split("\n").filter(l => l.trim().length > 0);
   const STATE_TYPES = new Set(['task-create', 'task-update', 'usage-update', 'assign', 'done']);
+  // talk/think/c-bubble/idle-chat는 실시간 SSE로만 표시 (새로고침 시 chat 폭탄 방지)
+  const REALTIME_ONLY = new Set(['talk', 'think', 'c-bubble', 'idle-chat']);
   const stateEntries: unknown[] = [];
-  const allParsed: unknown[] = [];
+  const recentEntries: unknown[] = [];
   for (const line of allLines) {
     try {
       const obj = JSON.parse(line) as any;
-      allParsed.push(obj);
       if (STATE_TYPES.has(obj.type)) stateEntries.push(obj);
+      else if (!REALTIME_ONLY.has(obj.type)) recentEntries.push(obj);
     } catch {}
   }
-  const recentEntries = allParsed.slice(-50);
-  // Merge: state events first, then recent (dedup by reference)
-  const recentSet = new Set(recentEntries);
-  const merged = [...stateEntries.filter(e => !recentSet.has(e)), ...recentEntries];
+  const recent = recentEntries.slice(-20);
+  const merged = [...stateEntries, ...recent];
   return new Response(JSON.stringify(merged), {
     headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
