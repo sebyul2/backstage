@@ -1654,21 +1654,25 @@ async function showChrisLogPopup() {
           chapterEl.insertBefore(divider, chapterEl.firstChild);
         }
 
-        // pending 챕터: 아직 응답이 없는 사용자 메시지
+        // pending 챕터: steps가 있으면 표시하고, 맨 아래에 진행 중 indicator 추가
         if (ch.pending) {
-          const pendingEl = document.createElement('div');
-          pendingEl.textContent = '⏳ ' + (window.i18n?.ui?.pending || '응답 대기 중...');
-          Object.assign(pendingEl.style, {
-            color: '#FFEC27', fontSize: '11px', padding: '8px 0',
-            opacity: '0.7', fontStyle: 'italic',
-          });
-          // 점멸 애니메이션
-          pendingEl.animate([{ opacity: 0.4 }, { opacity: 1 }], {
-            duration: 1200, iterations: Infinity, direction: 'alternate',
-          });
-          chapterEl.appendChild(pendingEl);
-          groupBody.appendChild(chapterEl);
-          return; // 이 챕터는 여기서 끝
+          const stepsArr = ch.steps || [];
+          if (stepsArr.length === 0) {
+            // steps가 정말 없을 때만 응답 대기 중
+            const pendingEl = document.createElement('div');
+            pendingEl.textContent = '⏳ ' + (window.i18n?.ui?.pending || '응답 대기 중...');
+            Object.assign(pendingEl.style, {
+              color: '#FFEC27', fontSize: '11px', padding: '8px 0',
+              opacity: '0.7', fontStyle: 'italic',
+            });
+            pendingEl.animate([{ opacity: 0.4 }, { opacity: 1 }], {
+              duration: 1200, iterations: Infinity, direction: 'alternate',
+            });
+            chapterEl.appendChild(pendingEl);
+            groupBody.appendChild(chapterEl);
+            return;
+          }
+          // steps가 있으면 아래 일반 렌더링으로 진행 (pending indicator만 추가)
         }
 
         // 시간순 steps 렌더링 (카테고리 헤더 + 전체 더보기)
@@ -1833,6 +1837,20 @@ async function showChrisLogPopup() {
             moreBtn.textContent = expanded ? (window.i18n?.ui?.collapse_button || '▲ Collapse') : (window.i18n?.ui?.more_button || '▼ +${n} more').replace('${n}', hiddenEls.length);
           });
           chapterEl.appendChild(moreBtn);
+        }
+
+        // pending chapter에 steps가 있으면 진행 중 indicator 추가
+        if (ch.pending) {
+          const indicator = document.createElement('div');
+          indicator.textContent = '⏳ ' + (window.i18n?.ui?.in_progress || '진행 중...');
+          Object.assign(indicator.style, {
+            color: '#FFEC27', fontSize: '10px', padding: '6px 0',
+            opacity: '0.7', fontStyle: 'italic',
+          });
+          indicator.animate([{ opacity: 0.4 }, { opacity: 1 }], {
+            duration: 1200, iterations: Infinity, direction: 'alternate',
+          });
+          chapterEl.appendChild(indicator);
         }
 
         groupBody.appendChild(chapterEl);
