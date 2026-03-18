@@ -694,7 +694,15 @@ function scanOtherSessionsTalk(): void {
               } else if (toolName && toolName !== 'Agent' && toolName !== 'Task') {
                 const fp = input?.file_path || input?.path || '';
                 const basename = typeof fp === 'string' && fp.length > 0 ? (fp.split('/').pop() || fp) : '';
-                steps.push({ type: 'tool', name: toolName, detail: basename });
+                const step: any = { type: 'tool', name: toolName, detail: basename };
+                if (toolName === 'Bash' && input?.command) step.detail = input.command.slice(0, 100);
+                if (toolName === 'Grep' && input?.pattern) step.detail = `/${input.pattern}/` + (input.path ? ' in ' + (input.path.split('/').pop() || '') : '');
+                if (toolName === 'Edit' && input?.old_string && input?.new_string) {
+                  const oldLines = input.old_string.trim().split('\n').slice(0, 3).map((l: string) => '- ' + l.slice(0, 120));
+                  const newLines = input.new_string.trim().split('\n').slice(0, 3).map((l: string) => '+ ' + l.slice(0, 120));
+                  step.change = oldLines.join('\n') + '\n' + newLines.join('\n');
+                }
+                steps.push(step);
               }
             }
             if (block.type === 'text' && block.text) {
@@ -735,8 +743,11 @@ function scanOtherSessionsTalk(): void {
             }
           }
 
+          // userMsg fallback: 비어있으면 otherSessionUserMsg에서 복원
+          const effectiveUserMsg = userMsg || otherSessionUserMsg.get(projectName) || '';
+
           // Chapter: 같은 프로젝트+userMsg면 기존 chapter에 merge
-          const shouldMerge = !!userMsg && userMsg === lastOtherUserMsg;
+          const shouldMerge = effectiveUserMsg === lastOtherUserMsg;
           if (shouldMerge) {
             try {
               const logContent = fs.existsSync(CHRIS_LOG_FILE) ? fs.readFileSync(CHRIS_LOG_FILE, 'utf-8') : '';
@@ -756,13 +767,18 @@ function scanOtherSessionsTalk(): void {
             } catch {}
           }
 
-          lastOtherUserMsg = userMsg;
+          lastOtherUserMsg = effectiveUserMsg;
+          if (!chapterTitle && effectiveUserMsg) {
+            let line = effectiveUserMsg.trim().replace(/^\d+[\.\)]\s*/, '');
+            line = line.replace(/[.。!！?？…~]+$/g, '').trim();
+            chapterTitle = line.length > 40 ? line.slice(0, 40) + '…' : (line || '');
+          }
           if (!chapterTitle) chapterTitle = '';
           const chapterEntry = JSON.stringify({
             ts: new Date().toTimeString().slice(0, 8),
             epoch: nowEpoch,
             title: chapterTitle,
-            userMsg: userMsg,
+            userMsg: effectiveUserMsg,
             steps,
             project: projectName,
           });
@@ -1670,14 +1686,26 @@ function scanTranscriptForAgentWork(): void {
       recordedTextHashes.add(chapterKey);
       chapterNewCount++;
 
+      // userMsg가 비어있으면 lastUserMessage fallback (스캔 간 유실 방지)
+      if (!chapterUserMsg && lastUserMessage) {
+        chapterUserMsg = lastUserMessage.split('\n')[0].slice(0, 500);
+      }
+
       if (!chapterTitle) {
-        const fb = responseText.slice(0, 25);
-        chapterTitle = responseText.length > 25 ? fb + '…' : (fb || '(무제)');
+        if (chapterUserMsg) {
+          let line = chapterUserMsg.trim().replace(/^\d+[\.\)]\s*/, '');
+          line = line.replace(/[.。!！?？…~]+$/g, '').trim();
+          chapterTitle = line.length > 40 ? line.slice(0, 40) + '…' : (line || '');
+        }
+        if (!chapterTitle) {
+          const fb = responseText.slice(0, 25);
+          chapterTitle = responseText.length > 25 ? fb + '…' : (fb || '');
+        }
       }
 
       // 같은 사용자 메시지이면 기존 챕터에 steps 추가 (같은 질문에 대한 추가 응답)
-      // 다른 사용자 메시지 = 무조건 새 챕터 (merge 하지 않음)
-      const shouldMerge = !!chapterUserMsg && chapterUserMsg === lastChapterUserMsg;
+      // userMsg가 비어있어도 이전과 같으면 merge (연속 응답 합치기)
+      const shouldMerge = chapterUserMsg === lastChapterUserMsg;
       if (shouldMerge) {
         try {
           const logContent = fs.existsSync(CHRIS_LOG_FILE) ? fs.readFileSync(CHRIS_LOG_FILE, 'utf-8') : '';

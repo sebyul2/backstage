@@ -1514,7 +1514,9 @@ async function showChrisLogPopup() {
       }
 
       // 그룹 key 계산 + 기존 DOM 재사용 (펼침 상태 보존)
-      const groupKey = (grp.userMsg || '').slice(0, 100) + '|' + (grp.chapters[0]?.ts || grp.ts || '');
+      // pending chapter의 ts는 매번 바뀌므로 groupKey에 'pending' 사용 (매번 새 그룹 인식 → 깜빡임 방지)
+      const hasPending = grp.chapters.some(c => c.pending);
+      const groupKey = (grp.userMsg || '').slice(0, 100) + '|' + (hasPending ? 'pending' : (grp.chapters[0]?.ts || grp.ts || ''));
       const _isNewGroup = !_prevKeys.has(groupKey);
 
       // 그룹 토글 키 + 열림 상태 (DOM 생성 전에 결정해야 깜빡임 방지)
