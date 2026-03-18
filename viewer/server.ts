@@ -747,7 +747,7 @@ function scanOtherSessionsTalk(): void {
           const effectiveUserMsg = userMsg || otherSessionUserMsg.get(projectName) || '';
 
           // Chapter: 같은 프로젝트+userMsg면 기존 chapter에 merge
-          const shouldMerge = effectiveUserMsg === lastOtherUserMsg;
+          const shouldMerge = !!effectiveUserMsg && effectiveUserMsg === lastOtherUserMsg;
           if (shouldMerge) {
             try {
               const logContent = fs.existsSync(CHRIS_LOG_FILE) ? fs.readFileSync(CHRIS_LOG_FILE, 'utf-8') : '';
@@ -773,7 +773,16 @@ function scanOtherSessionsTalk(): void {
             line = line.replace(/[.。!！?？…~]+$/g, '').trim();
             chapterTitle = line.length > 40 ? line.slice(0, 40) + '…' : (line || '');
           }
-          if (!chapterTitle) chapterTitle = '';
+          // title fallback: response text에서 추출
+          if (!chapterTitle) {
+            const firstResp = steps.find((s: any) => s.type === 'response');
+            if (firstResp?.text) {
+              const fb = firstResp.text.slice(0, 40);
+              chapterTitle = firstResp.text.length > 40 ? fb + '…' : fb;
+            }
+          }
+          // userMsg도 title도 없으면 스킵 (무제 챕터 방지)
+          if (!chapterTitle && !effectiveUserMsg) continue;
           const chapterEntry = JSON.stringify({
             ts: new Date().toTimeString().slice(0, 8),
             epoch: nowEpoch,
@@ -1705,7 +1714,7 @@ function scanTranscriptForAgentWork(): void {
 
       // 같은 사용자 메시지이면 기존 챕터에 steps 추가 (같은 질문에 대한 추가 응답)
       // userMsg가 비어있어도 이전과 같으면 merge (연속 응답 합치기)
-      const shouldMerge = chapterUserMsg === lastChapterUserMsg;
+      const shouldMerge = !!chapterUserMsg && chapterUserMsg === lastChapterUserMsg;
       if (shouldMerge) {
         try {
           const logContent = fs.existsSync(CHRIS_LOG_FILE) ? fs.readFileSync(CHRIS_LOG_FILE, 'utf-8') : '';
@@ -2206,11 +2215,24 @@ const server = Bun.serve({
             const lastMsg = lastEntry?.userMsg || '';
             const pendingMsg = lastUserMessage.split('\n')[0].slice(0, 100);
             if (pendingMsg && pendingMsg !== lastMsg.slice(0, 100)) {
+              // hook 기반 pending-steps (tool 사용 직후 기록되므로 transcript 완료 전에도 실시간 갱신)
+              let hookSteps: any[] = [];
+              try {
+                const psFile = path.join(PLUGIN_DIR, 'pending-steps.jsonl');
+                if (fs.existsSync(psFile)) {
+                  const psContent = fs.readFileSync(psFile, 'utf-8').trim();
+                  if (psContent) {
+                    hookSteps = psContent.split('\n').map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+                  }
+                }
+              } catch {}
+              // transcript 기반 pendingChapterSteps와 hook 기반 hookSteps 합산
+              const mergedSteps = hookSteps.length > 0 ? hookSteps : (pendingChapterSteps.length > 0 ? [...pendingChapterSteps] : []);
               entries.push({
                 userMsg: lastUserMessage,
                 title: '',
                 ts: new Date().toTimeString().slice(0, 8),
-                steps: pendingChapterSteps.length > 0 ? [...pendingChapterSteps] : [],
+                steps: mergedSteps,
                 pending: true,
               });
             }

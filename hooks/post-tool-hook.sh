@@ -232,6 +232,33 @@ if [ "$tool_name" = "Task" ] || [ "$tool_name" = "Agent" ]; then
     fi
 fi
 
+# ── Pending Steps 기록 (chris-log 실시간 갱신용) ────────────────────────────
+PENDING_STEPS_FILE="$PLUGIN_DIR/pending-steps.jsonl"
+case "$tool_name" in
+    Read|Edit|Grep|Glob|Write|Bash)
+        _ps_detail=""
+        case "$tool_name" in
+            Read)   _ps_detail=$(echo "$input" | jq -r '.tool_input.file_path // ""' | xargs basename 2>/dev/null) ;;
+            Edit)   _ps_detail=$(echo "$input" | jq -r '.tool_input.file_path // ""' | xargs basename 2>/dev/null) ;;
+            Write)  _ps_detail=$(echo "$input" | jq -r '.tool_input.file_path // ""' | xargs basename 2>/dev/null) ;;
+            Grep)   _ps_detail=$(echo "$input" | jq -r '"/" + (.tool_input.pattern // "")[:50] + "/"') ;;
+            Glob)   _ps_detail=$(echo "$input" | jq -r '(.tool_input.pattern // "")[:50]') ;;
+            Bash)   _ps_detail=$(echo "$input" | jq -r '(.tool_input.command // "")[:80]') ;;
+        esac
+        jq -nc --arg type "tool" --arg name "$tool_name" --arg detail "$_ps_detail" \
+            '{type:$type,name:$name,detail:$detail}' >> "$PENDING_STEPS_FILE"
+        ;;
+    Agent|Task)
+        _ps_atype=$(echo "$input" | jq -r '.tool_input.subagent_type // ""')
+        if [ -n "$_ps_atype" ] && ! echo "$_ps_atype" | grep -q "dialogue-generator"; then
+            _ps_desc=$(echo "$input" | jq -r '(.tool_input.description // .tool_input.prompt // "")[:80]')
+            _ps_short=$(echo "$_ps_atype" | sed 's/^oh-my-claudecode://')
+            jq -nc --arg type "agent" --arg name "$_ps_short" --arg desc "$_ps_desc" \
+                '{type:$type,name:$name,desc:$desc}' >> "$PENDING_STEPS_FILE"
+        fi
+        ;;
+esac
+
 # ── 일반 도구 완료 요약 (C-Team 동적 풀 할당 + 말풍선) ────────────────────
 case "$tool_name" in
     Read|Edit|Grep|Glob|Write|Bash)

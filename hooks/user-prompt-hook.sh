@@ -62,6 +62,10 @@ if echo "$prompt" | grep -qE "^당신은 판교 IT 스타트업 대화 생성기
   exit 0
 fi
 
+# pending-steps 초기화 (새 질문 시작 → 이전 tool steps 정리)
+PENDING_STEPS_FILE="$PLUGIN_DIR/pending-steps.jsonl"
+> "$PENDING_STEPS_FILE" 2>/dev/null
+
 timestamp=$(date '+%H:%M:%S')
 epoch=$(date '+%s')
 
