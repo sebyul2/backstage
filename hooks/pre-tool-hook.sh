@@ -2,7 +2,7 @@
 # PreToolUse Hook - 도구 사용 기록 + Task 에이전트 정보 저장
 
 # Backstage 비활성 상태면 즉시 종료 (토큰 절약)
-[ ! -f "$HOME/.claude/plugins/backstage/enabled" ] && exit 0
+[ ! -f "$HOME/.claude/plugins/backstage/enabled" ] && echo '{"decision":"allow","exitCode":0}' && exit 0
 # stderr 억제 (다른 세션에서 hook error 표시 방지)
 exec 2>/dev/null
 

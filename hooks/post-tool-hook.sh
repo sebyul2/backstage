@@ -2,7 +2,7 @@
 # PostToolUse Hook - dialogue-generator 결과 처리 + Task 완료 대화 트리거
 
 # Backstage 비활성 상태면 즉시 종료 (토큰 절약)
-[ ! -f "$HOME/.claude/plugins/backstage/enabled" ] && exit 0
+[ ! -f "$HOME/.claude/plugins/backstage/enabled" ] && echo '{"continue":true}' && exit 0
 # stderr 억제 (다른 세션에서 hook error 표시 방지)
 exec 2>/dev/null
 
