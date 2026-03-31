@@ -55,6 +55,12 @@ if echo "$prompt" | grep -qE "^Tool loaded\.$|^Tool(s)? (not )?found|^No tools";
   exit 0
 fi
 
+# Task/Agent 완료 알림 필터링 (시스템 주입 메시지, 사용자 발화가 아님)
+if echo "$prompt" | grep -qE "<task-notification>|Full transcript available at:"; then
+  echo '{"continue": true}'
+  exit 0
+fi
+
 # AI 대화 생성 프롬프트 패턴 필터링 (hook 내부 claude 호출의 재귀 방지)
 # claude --print으로 dialogue-queue 처리 시 UserPromptSubmit이 트리거되어 프롬프트가 history에 누출됨
 if echo "$prompt" | grep -qE "^당신은 판교 IT 스타트업 대화 생성기입니다|^IT 스타트업.*슬랙 대화|IT스타트업 .+가 이 상황을 보고 한마디|IT startup .+ (completed|reacts)|JSON만.*lines.*speaker.*msg|JSON only.*lines.*speaker.*msg|작업 완료.*한마디|완료 보고 한마디|completion report|One-liner"; then
