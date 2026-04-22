@@ -168,13 +168,45 @@ export class BubbleManager {
   }
 
   // Render all active bubbles
+  // I4: 같은 Y영역에 말풍선이 겹치지 않도록 이미 점유된 박스를 피해 위로 밀어올림.
   render(ctx, characters) {
+    // 캐릭터를 Y 좌표 내림차순(아래→위)으로 정렬: 아래 캐릭터부터 기본 위치 사용,
+    // 위쪽 캐릭터는 겹칠 경우 더 높이 올림.
+    const items = [];
     for (const [name, bubble] of this.active) {
       const char = characters.get(name);
       if (!char) continue;
-
       bubble.measure(ctx);
-      this._drawBubble(ctx, bubble, char.x, char.y - 32);
+      items.push({ name, bubble, char });
+    }
+    items.sort((a, b) => b.char.y - a.char.y);
+
+    const placed = []; // [{x, y, w, h}]
+    for (const { bubble, char } of items) {
+      const cx = char.x;
+      let cy = char.y - 32;
+      // 충돌 회피: 이미 배치된 bubble box와 겹치면 18px 씩 위로
+      let attempts = 0;
+      while (attempts < 6) {
+        const bx = cx - bubble.width / 2;
+        const by = cy - bubble.height - BUBBLE_TAIL_H;
+        const overlaps = placed.some(p =>
+          bx < p.x + p.w + 4 &&
+          bx + bubble.width + 4 > p.x &&
+          by < p.y + p.h + 4 &&
+          by + bubble.height + 4 > p.y
+        );
+        if (!overlaps) break;
+        cy -= 18;
+        attempts++;
+      }
+      this._drawBubble(ctx, bubble, cx, cy);
+      placed.push({
+        x: cx - bubble.width / 2,
+        y: cy - bubble.height - BUBBLE_TAIL_H,
+        w: bubble.width,
+        h: bubble.height,
+      });
     }
   }
 

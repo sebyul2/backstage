@@ -26,6 +26,13 @@ const RUN_SPEED = 1800;   // running to desk (1.5x)
 const IDLE_MIN = 4000;   // ms before break room wander
 const IDLE_MAX = 10000;
 const ARRIVE_DIST = 6;
+
+// I3: Agent lifecycle timeouts
+// - 서버: AGENT_IDLE_TIMEOUT = 30s (transcript 기반 무활동 감지)
+// - 서버/훅: SubagentStop 이벤트 (정확한 완료 신호, 주 경로)
+// - 클라이언트: AGENT_ABSOLUTE_TTL = 120s (assign 시점부터 재진입 영향 없음)
+//   → 서버 신호가 유실되거나 훅 비활성 상태여도 반드시 퇴근시키는 마지막 방어선.
+const AGENT_ABSOLUTE_TTL = 120_000;
 const DOOR_X = 14.5 * TILE_SIZE;
 const DOOR_Y = 7.5 * TILE_SIZE;
 
@@ -261,9 +268,8 @@ export class Character {
     this.currentTask = { description, startTime: ts };
     this.taskStartTime = ts;
     this.active = true;
-    // Absolute lifetime TTL — 120s 내에 외부 done 신호가 오지 않으면 강제 퇴근.
-    // WORKING 재진입으로 리셋되는 기존 45s safety 와 독립적으로 동작.
-    this.lifetimeDeadline = ts + 120000;
+    // I3: Absolute lifetime TTL — assign 시점부터. 재진입으로 리셋 안 됨.
+    this.lifetimeDeadline = ts + AGENT_ABSOLUTE_TTL;
   }
 
   // Complete current task — walk back to break room (idempotent)
@@ -415,11 +421,9 @@ export class Character {
             this.deactivateTool();
           }
         } else {
-          // Absolute TTL: assignTask 시점부터 120s. 재진입으로 리셋 안 됨.
+          // I3: Absolute TTL 만 유지 (45s workTimer safety 제거 — 재진입 리셋되어 의미 없음).
+          // 서버 SubagentStop/30s-idle-timeout/hook done 이 모두 실패해도 이 경로로 반드시 퇴근.
           if (this.lifetimeDeadline && Date.now() >= this.lifetimeDeadline) {
-            this.completeTask();
-          } else if (this.workTimer > 45000) {
-            // Regular agent: safety timeout 45s (workTimer 기반 — 재진입 리셋 가능)
             this.completeTask();
           }
         }

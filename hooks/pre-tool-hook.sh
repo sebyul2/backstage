@@ -98,7 +98,8 @@ if [ "$tool_name" = "TaskCreate" ]; then
 fi
 
 # 서버에 즉시 transcript 스캔 트리거 (thinking 실시간 반영)
-curl -s http://localhost:7777/trigger-scan >/dev/null 2>&1 &
+# I1a: --max-time/connect-timeout 으로 서버 down 시 훅 stuck 방지
+curl -s --max-time 0.2 --connect-timeout 0.2 http://localhost:7777/trigger-scan >/dev/null 2>&1 &
 
 # PreToolUse는 반드시 decision JSON을 stdout으로 반환해야 함
 # 빈 stdout이면 Claude Code가 "hook error"로 표시함

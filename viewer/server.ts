@@ -484,6 +484,9 @@ const activeAgents: Map<string, { lastActivity: number; startTime: number; agent
 let lastAgentStatusEpoch = 0;
 const AGENT_IDLE_TIMEOUT = 30_000; // 30 seconds without activity → auto "done"
 
+// I2: /chris-log 응답 메모리 캐시 (파일 mtime+size 기반 invalidation)
+const chrisLogCache: { key: string; entries: any[] } = { key: '', entries: [] };
+
 // Server startup cleanup: remove stale agent data from previous sessions
 try { fs.unlinkSync(path.join(PLUGIN_DIR, 'active-agent.json')); } catch {}
 
@@ -2213,8 +2216,18 @@ const server = Bun.serve({
       }
       case "/chris-log": {
         try {
-          const content = fs.existsSync(CHRIS_LOG_FILE) ? fs.readFileSync(CHRIS_LOG_FILE, 'utf-8') : '';
-          const entries = content.trim().split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+          // I2: mtime+size 기반 메모리 캐시 — 같은 파일 상태면 파싱 재사용
+          const stat = fs.existsSync(CHRIS_LOG_FILE) ? fs.statSync(CHRIS_LOG_FILE) : null;
+          const cacheKey = stat ? `${stat.mtimeMs}-${stat.size}` : 'empty';
+          let entries: any[];
+          if (chrisLogCache.key === cacheKey) {
+            entries = chrisLogCache.entries.slice(); // 얕은 복사 (pending 추가 대비)
+          } else {
+            const content = stat ? fs.readFileSync(CHRIS_LOG_FILE, 'utf-8') : '';
+            entries = content.trim().split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+            chrisLogCache.key = cacheKey;
+            chrisLogCache.entries = entries.slice();
+          }
 
           // epoch 기준 정렬 (다른 세션 chapter가 중간에 끼어들어도 시간순 보장)
           entries.sort((a: any, b: any) => (a.epoch || 0) - (b.epoch || 0));
@@ -2403,8 +2416,18 @@ const server = Bun.serve({
             }
 
             // 3) 보존된 이벤트 + 복원된 태스크 이벤트로 history 갱신
+            // B4: 원자적 교체 — tmp 파일 쓴 뒤 rename. SSE tail read 중 partial write 방지.
             const allLines = [...preserved, ...newTaskEvents];
-            fs.writeFileSync(HISTORY_FILE, allLines.length > 0 ? allLines.join('\n') + '\n' : '');
+            const payload = allLines.length > 0 ? allLines.join('\n') + '\n' : '';
+            const tmpPath = `${HISTORY_FILE}.refresh.${process.pid}.${Date.now()}`;
+            try {
+              fs.writeFileSync(tmpPath, payload);
+              fs.renameSync(tmpPath, HISTORY_FILE);
+            } catch {
+              // rename 실패 시 tmp 정리만 (기존 파일은 보존)
+              try { fs.unlinkSync(tmpPath); } catch {}
+              throw new Error('refresh rename failed');
+            }
           }
           return new Response(JSON.stringify({ ok: true }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
         } catch {
@@ -2659,12 +2682,18 @@ async function processDialogueQueue(): Promise<void> {
           stderr: 'pipe',
           env: cleanEnv,
         });
-        const killTimer = setTimeout(() => { try { proc.kill(); } catch {} }, 60_000);
+        // I5: TERM 후 5초 내 미종료 시 KILL 로 에스컬레이션 — 좀비 자식 방지
+        let escalateTimer: ReturnType<typeof setTimeout> | null = null;
+        const termTimer = setTimeout(() => {
+          try { proc.kill('SIGTERM'); } catch {}
+          escalateTimer = setTimeout(() => { try { proc.kill('SIGKILL'); } catch {} }, 5_000);
+        }, 45_000); // 60s→45s 단축 (큐 막힘 완화)
 
         const output = await new Response(proc.stdout).text();
         const stderr = await new Response(proc.stderr).text();
         await proc.exited;
-        clearTimeout(killTimer);
+        clearTimeout(termTimer);
+        if (escalateTimer) clearTimeout(escalateTimer);
 
         const exitCode = proc.exitCode;
         if (stderr.trim()) console.error('[dialogue] stderr:', stderr.trim().slice(0, 200));
@@ -2766,6 +2795,33 @@ const dialogueQueueTimer = setInterval(() => {
 const claudeSessionTimer = setInterval(() => {
   refreshActiveClaudeSessions();
 }, 30_000);
+
+// I2: history.jsonl rotate — 5분마다 크기 검사, 10MB 초과 시 최신 50% 만 유지
+const HISTORY_ROTATE_THRESHOLD = 10 * 1024 * 1024; // 10MB
+const historyRotateTimer = setInterval(() => {
+  try {
+    if (!fs.existsSync(HISTORY_FILE)) return;
+    const stat = fs.statSync(HISTORY_FILE);
+    if (stat.size < HISTORY_ROTATE_THRESHOLD) return;
+
+    // 파일 tail 절반만 남김 — 전체 파싱 없이 오프셋만으로 안전하게 트림
+    const keepBytes = Math.floor(stat.size / 2);
+    const fd = fs.openSync(HISTORY_FILE, 'r');
+    const buf = Buffer.alloc(keepBytes);
+    fs.readSync(fd, buf, 0, keepBytes, stat.size - keepBytes);
+    fs.closeSync(fd);
+    // 앞부분 잘린 부분의 첫 줄바꿈 이후만 남겨 partial JSON 회피
+    const newlineIdx = buf.indexOf(0x0a); // '\n'
+    const sliced = newlineIdx >= 0 ? buf.slice(newlineIdx + 1) : buf;
+
+    const tmpPath = `${HISTORY_FILE}.rotate.${process.pid}`;
+    fs.writeFileSync(tmpPath, sliced);
+    fs.renameSync(tmpPath, HISTORY_FILE);
+    console.log(`[rotate] history.jsonl ${(stat.size / 1024 / 1024).toFixed(1)}MB → ${(sliced.length / 1024 / 1024).toFixed(1)}MB`);
+  } catch (err) {
+    console.error('[rotate] history rotate failed:', err);
+  }
+}, 5 * 60 * 1000);
 
 // ─── Auto-shutdown: no SSE listeners for 10 minutes ──────────
 let lastListenerTime = Date.now();
