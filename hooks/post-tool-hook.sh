@@ -2,7 +2,7 @@
 # PostToolUse Hook - dialogue-generator 결과 처리 + Task 완료 대화 트리거
 
 # Backstage 비활성 상태면 즉시 종료 (토큰 절약)
-[ ! -f "$HOME/.claude/plugins/backstage/enabled" ] && echo '{"continue":true}' && exit 0
+[ ! -f "$HOME/.claude/plugins/backstage/enabled" ] && echo '{}' && exit 0
 # stderr 억제 (다른 세션에서 hook error 표시 방지)
 exec 2>/dev/null
 
@@ -19,9 +19,28 @@ _I18N="$PLUGIN_DIR/hooks-i18n/${_LANG}.json"
 [ ! -f "$_I18N" ] && _I18N="$PLUGIN_DIR/hooks-i18n/en.json"
 
 # ── C-team 동적 풀 할당 함수 ──────────────────────────────────────
+# B6: flock 으로 read→write 임계구역 보호 (멀티 세션 동시 실행 대응)
 get_cteam_char() {
     local tool="$1"
+    mkdir -p "$(dirname "$C_TEAM_POOL_FILE")"
     [ ! -f "$C_TEAM_POOL_FILE" ] && echo '{}' > "$C_TEAM_POOL_FILE"
+
+    # macOS / Linux 모두 flock 사용 가능 여부 체크
+    if ! command -v flock >/dev/null 2>&1; then
+        # flock 없으면 race 가능성 있으나 기존 동작 유지 (개별 세션에선 실무상 문제 없음)
+        _cteam_assign_inner "$tool"
+        return
+    fi
+
+    local lock="${C_TEAM_POOL_FILE}.lock"
+    (
+        flock -x 9
+        _cteam_assign_inner "$tool"
+    ) 9>"$lock"
+}
+
+_cteam_assign_inner() {
+    local tool="$1"
     local existing=$(jq -r --arg t "$tool" '.[$t] // ""' "$C_TEAM_POOL_FILE" 2>/dev/null)
     if [ -n "$existing" ] && [ "$existing" != "" ]; then
         echo "$existing"
@@ -222,12 +241,36 @@ if [ "$tool_name" = "Task" ] || [ "$tool_name" = "Agent" ]; then
     fi
 fi
 
-# ── 일반 Task/Agent 완료 시: AI 대화 생성 없이 조용히 완료 ────────────────
-# (완료 대사는 AI 대화 OFF일 때 fallback만 표시, ON이면 assign 시점에서만 대화)
+# ── 일반 Task/Agent 완료 시: done 이벤트 반드시 발행 (캐릭터 퇴근 트리거) ──
+# B1a: dialogue-generator 여부와 무관하게 done 이벤트를 한 줄 기록.
+#      AI 대사가 없어도 캐릭터가 WORKING → IDLE_BREAK 로 전환되도록 빈 msg 로 발행.
+#      플러그인 네임스페이스(plugin:agent_type)는 stripping 후 매핑.
 if [ "$tool_name" = "Task" ] || [ "$tool_name" = "Agent" ]; then
     agent_type=$(echo "$input" | jq -r '.tool_input.subagent_type // "unknown"')
     if ! echo "$agent_type" | grep -q "dialogue-generator"; then
-        # dialogue-generator가 아닌 일반 에이전트 완료 → 아무것도 안 함
+        agent_short=$(echo "$agent_type" | sed 's/^[^:]*://')
+        case "$agent_short" in
+            explore|explore-medium) done_name="Jake" ;;
+            oracle|oracle-medium|oracle-low|architect) done_name="David" ;;
+            sisyphus-junior|sisyphus-junior-low|sisyphus-junior-high|executor) done_name="Kevin" ;;
+            frontend-engineer|frontend-engineer-low|frontend-engineer-high|designer) done_name="Sophie" ;;
+            document-writer|writer) done_name="Emily" ;;
+            librarian|librarian-low) done_name="Michael" ;;
+            prometheus|planner) done_name="Alex" ;;
+            momus) done_name="Rachel" ;;
+            metis) done_name="Tom" ;;
+            multimodal-looker) done_name="Luna" ;;
+            qa-tester) done_name="Sam" ;;
+            *) done_name="" ;;
+        esac
+
+        if [ -n "$done_name" ]; then
+            done_ts=$(date '+%H:%M:%S')
+            done_ep=$(date '+%s')
+            mkdir -p "$(dirname "$HISTORY_FILE")"
+            jq -nc --arg ts "$done_ts" --arg ep "$done_ep" --arg sp "$done_name" --arg role "$agent_short" \
+                '{ts:$ts,epoch:($ep|tonumber),type:"done",speaker:$sp,role:$role,msg:""}' >> "$HISTORY_FILE"
+        fi
         exit 0
     fi
 fi
@@ -252,7 +295,7 @@ case "$tool_name" in
         _ps_atype=$(echo "$input" | jq -r '.tool_input.subagent_type // ""')
         if [ -n "$_ps_atype" ] && ! echo "$_ps_atype" | grep -q "dialogue-generator"; then
             _ps_desc=$(echo "$input" | jq -r '(.tool_input.description // .tool_input.prompt // "")[:80]')
-            _ps_short=$(echo "$_ps_atype" | sed 's/^oh-my-claudecode://')
+            _ps_short=$(echo "$_ps_atype" | sed 's/^[^:]*://')
             jq -nc --arg type "agent" --arg name "$_ps_short" --arg desc "$_ps_desc" \
                 '{type:$type,name:$name,desc:$desc}' >> "$PENDING_STEPS_FILE"
         fi
@@ -344,7 +387,15 @@ case "$tool_name" in
                 # 큐에 C-team 대화 생성 요청 기록 (server.ts가 소비)
                 mkdir -p "$(dirname "$DIALOGUE_QUEUE_FILE")"
                 _ctpl=$(jq -r '.dialogue_prompt.c_bubble_template // "IT startup. ${speaker}(${desc}) working on: ${data}. Short chat with Chris(boss). Dev humor required, mention specific work, each speaks 1-2 times, 20-50 chars/line. JSON only: {\"lines\":[{\"speaker\":\"boss\",\"msg\":\"..\"},{\"speaker\":\"${speaker}\",\"msg\":\"..\"}]}"' "$_I18N" 2>/dev/null)
-                _cprompt=$(echo "$_ctpl" | sed "s/\${speaker}/$c_name/g; s/\${desc}/$c_desc/g; s|\${data}|$data_summary|g")
+                # B3: sed injection 방지
+                _cprompt=$(_TPL="$_ctpl" _SPEAKER="$c_name" _DESC="$c_desc" _DATA="$data_summary" python3 -c '
+import os
+tpl = os.environ.get("_TPL","")
+s = os.environ.get("_SPEAKER","")
+d = os.environ.get("_DESC","")
+data = os.environ.get("_DATA","")
+print(tpl.replace("${speaker}", s).replace("${desc}", d).replace("${data}", data))
+' 2>/dev/null)
                 jq -nc --arg ep "$(date +%s)" --arg speaker "$c_name" --arg role "$c_role" --arg data "$data_summary" --arg desc "$c_desc" --arg dtype "c-bubble" --arg prompt "$_cprompt" \
                     '{epoch:($ep|tonumber),speaker:$speaker,role:$role,type:$dtype,prompt:$prompt}' >> "$DIALOGUE_QUEUE_FILE"
                 echo "$now_epoch" > "$C_BUBBLE_LAST_FILE"

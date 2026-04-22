@@ -261,12 +261,20 @@ export class Character {
     this.currentTask = { description, startTime: ts };
     this.taskStartTime = ts;
     this.active = true;
+    // Absolute lifetime TTL — 120s 내에 외부 done 신호가 오지 않으면 강제 퇴근.
+    // WORKING 재진입으로 리셋되는 기존 45s safety 와 독립적으로 동작.
+    this.lifetimeDeadline = ts + 120000;
   }
 
-  // Complete current task — walk back to break room
+  // Complete current task — walk back to break room (idempotent)
   completeTask() {
     if (this.role === 'boss') return;
     if (this._isCTeam) return; // [C] team never leaves desk
+    // Idempotent: 이미 퇴근 중이거나 휴게실이면 중복 실행 방지
+    if (this.state === S.WALKING_TO_BREAK || this.state === S.IDLE_BREAK || this.state === S.WALKING_BREAK) {
+      return;
+    }
+    this.lifetimeDeadline = 0;
     if (this.currentTask) {
       this.tasksCompleted++;
       this.currentTask = null;
@@ -407,8 +415,11 @@ export class Character {
             this.deactivateTool();
           }
         } else {
-          // Regular agent: safety timeout 45s
-          if (this.workTimer > 45000) {
+          // Absolute TTL: assignTask 시점부터 120s. 재진입으로 리셋 안 됨.
+          if (this.lifetimeDeadline && Date.now() >= this.lifetimeDeadline) {
+            this.completeTask();
+          } else if (this.workTimer > 45000) {
+            // Regular agent: safety timeout 45s (workTimer 기반 — 재진입 리셋 가능)
             this.completeTask();
           }
         }

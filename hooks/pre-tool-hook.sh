@@ -2,7 +2,7 @@
 # PreToolUse Hook - 도구 사용 기록 + Task 에이전트 정보 저장
 
 # Backstage 비활성 상태면 즉시 종료 (토큰 절약)
-[ ! -f "$HOME/.claude/plugins/backstage/enabled" ] && echo '{"decision":"allow","exitCode":0}' && exit 0
+[ ! -f "$HOME/.claude/plugins/backstage/enabled" ] && echo '{}' && exit 0
 # stderr 억제 (다른 세션에서 hook error 표시 방지)
 exec 2>/dev/null
 
@@ -100,6 +100,10 @@ fi
 # 서버에 즉시 transcript 스캔 트리거 (thinking 실시간 반영)
 curl -s http://localhost:7777/trigger-scan >/dev/null 2>&1 &
 
+# PreToolUse는 반드시 decision JSON을 stdout으로 반환해야 함
+# 빈 stdout이면 Claude Code가 "hook error"로 표시함
+RESPONSE='{"decision":"allow"}'
+
 if [ "$tool_name" = "Task" ] || [ "$tool_name" = "Agent" ]; then
     agent_type=$(echo "$input" | jq -r '.tool_input.subagent_type // "unknown"')
     description=$(echo "$input" | jq -r '.tool_input.description // ""')
@@ -131,7 +135,15 @@ if [ "$tool_name" = "Task" ] || [ "$tool_name" = "Agent" ]; then
         # 캐릭터별 성격 (i18n에서 로드)
         c_desc=$(jq -r --arg n "$agent_name" '.c_team[$n] // .characters[$n] // "IT team member"' "$_I18N" 2>/dev/null)
         _atpl=$(jq -r '.dialogue_prompt.assign_template // "IT startup office. Chris(boss,witty+blunt) assigns to ${speaker}(${desc}): \"${task}\". Rules: mention specific task content, dev humor required, no generic phrases, each speaks 2-3 times, 30-50 chars/line. JSON only: {\"lines\":[{\"speaker\":\"boss\",\"msg\":\"..\"},{\"speaker\":\"agent\",\"msg\":\"..\"}]}"' "$_I18N" 2>/dev/null)
-        _aprompt=$(echo "$_atpl" | sed "s/\${speaker}/$agent_name/g; s/\${desc}/$c_desc/g; s|\${task}|$description|g")
+        # B3: sed injection 방지 — 환경변수로 전달 후 python에서 리터럴 치환
+        _aprompt=$(_TPL="$_atpl" _SPEAKER="$agent_name" _DESC="$c_desc" _TASK="$description" python3 -c '
+import os
+tpl = os.environ.get("_TPL","")
+s = os.environ.get("_SPEAKER","")
+d = os.environ.get("_DESC","")
+t = os.environ.get("_TASK","")
+print(tpl.replace("${speaker}", s).replace("${desc}", d).replace("${task}", t))
+' 2>/dev/null)
         mkdir -p "$(dirname "$DIALOGUE_QUEUE_FILE")"
         jq -nc --arg ep "$(date +%s)" --arg speaker "$agent_name" --arg role "$agent_type" --arg dtype "assign" --arg prompt "$_aprompt" \
             '{epoch:($ep|tonumber),speaker:$speaker,role:$role,type:$dtype,prompt:$prompt}' >> "$DIALOGUE_QUEUE_FILE"

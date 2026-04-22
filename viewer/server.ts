@@ -454,7 +454,17 @@ function refreshActiveClaudeSessions(): void {
 refreshActiveClaudeSessions(); // 서버 시작 시 즉시 1회 실행
 
 // Thinking cache: msgId → thinking content (survives transcript redaction)
+// B5: LRU 캡 — Map 의 insertion order 를 이용해 상한 초과 시 가장 오래된 항목 제거
 const thinkingCache = new Map<string, string>();
+const THINKING_CACHE_MAX = 200;
+function thinkingCacheSet(msgId: string, content: string): void {
+  if (thinkingCache.has(msgId)) thinkingCache.delete(msgId);
+  thinkingCache.set(msgId, content);
+  if (thinkingCache.size > THINKING_CACHE_MAX) {
+    const oldest = thinkingCache.keys().next().value;
+    if (oldest !== undefined) thinkingCache.delete(oldest);
+  }
+}
 let transcriptWatcher: fs.FSWatcher | null = null;
 
 function setupTranscriptWatcher(): void {
@@ -689,7 +699,7 @@ function scanOtherSessionsTalk(): void {
               const toolName = block.name || '';
               const input = block.input as any;
               if ((toolName === 'Agent' || toolName === 'Task') && input?.subagent_type) {
-                const agentType = String(input.subagent_type).replace(/^oh-my-claudecode:/, '');
+                const agentType = String(input.subagent_type).replace(/^[^:]+:/, '');
                 steps.push({ type: 'agent', name: agentType, desc: (input.description || '').slice(0, 80) });
               } else if (toolName && toolName !== 'Agent' && toolName !== 'Task') {
                 const fp = input?.file_path || input?.path || '';
@@ -1368,11 +1378,11 @@ function scanTranscriptForAgentWork(): void {
         for (const block of entry.message.content) {
           if (block.type !== "thinking") continue;
 
-          // Thinking cache: transcript에서 redact되기 전에 캡처
+          // Thinking cache: transcript에서 redact되기 전에 캡처 (B5: LRU 캡 적용)
           if (block.thinking && block.thinking.length > 30) {
             if (msgId && !thinkingCache.has(msgId)) {
-              thinkingCache.set(msgId, block.thinking);
-              console.log(`[think-cache] cached msgId=${msgId.slice(0,12)} len=${block.thinking.length}`);
+              thinkingCacheSet(msgId, block.thinking);
+              console.log(`[think-cache] cached msgId=${msgId.slice(0,12)} len=${block.thinking.length} size=${thinkingCache.size}`);
             }
           } else if (!block.thinking && msgId && thinkingCache.has(msgId)) {
             // Redacted → restore from cache
@@ -1642,7 +1652,7 @@ function scanTranscriptForAgentWork(): void {
           const input = block.input as any;
 
           if ((toolName === 'Agent' || toolName === 'Task') && input?.subagent_type) {
-            const agentType = String(input.subagent_type).replace(/^oh-my-claudecode:/, '');
+            const agentType = String(input.subagent_type).replace(/^[^:]+:/, '');
             const desc = (input.description || input.prompt || '').slice(0, 80);
             steps.push({ type: 'agent', name: agentType, desc });
           } else if (toolName && toolName !== 'Agent' && toolName !== 'Task') {

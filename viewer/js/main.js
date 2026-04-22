@@ -20,7 +20,7 @@ let eventSource = null;
 let reconnectTimer = null;
 let reconnectDelay = 1000;
 let reconnectAttempts = 0;
-const MAX_RECONNECT = 5;
+const RECONNECT_MAX_DELAY = 60000; // 1분 상한 (무한 백오프)
 
 // ─── Dashboard State ─────────────────────────────────────────────────────────
 const dashboardState = {
@@ -220,36 +220,40 @@ const ROLE_TO_NAME = {
   'c-task': 'Luna', 'c-other': 'Owen',
 };
 
+// Strip plugin namespace from role strings (e.g. "oh-my-claudecode:executor" → "executor")
+function stripNamespace(key) {
+  if (typeof key !== 'string') return key;
+  const idx = key.indexOf(':');
+  return idx >= 0 ? key.slice(idx + 1) : key;
+}
+
+function lookupRoleName(key) {
+  if (!key) return null;
+  return ROLE_TO_NAME[key] || ROLE_TO_NAME[stripNamespace(key)] || null;
+}
+
 function resolveCharName(entry) {
   // Try direct speaker name
   if (entry.speaker && characters.get(entry.speaker)) return entry.speaker;
   // Try agent field (character name from dialogue-generator)
   if (entry.agent && characters.get(entry.agent)) return entry.agent;
-  // Try role mapping
-  if (entry.role) {
-    const name = ROLE_TO_NAME[entry.role];
-    if (name) return name;
-  }
-  // Try agent_type field
-  if (entry.agent_type) {
-    const name = ROLE_TO_NAME[entry.agent_type];
-    if (name) return name;
-  }
+  // Try role mapping (with namespace fallback)
+  const byRole = lookupRoleName(entry.role);
+  if (byRole) return byRole;
+  // Try agent_type field (with namespace fallback)
+  const byType = lookupRoleName(entry.agent_type);
+  if (byType) return byType;
   return entry.speaker || null;
 }
 
 // Resolve 'agent' speaker using entry context (agent name, role, agent_type)
 function resolveAgentSpeaker(entry) {
-  // Try entry.agent field (character name)
   if (entry.agent && characters.get(entry.agent)) return entry.agent;
-  // Try entry.agent_type / role
-  if (entry.agent_type) {
-    const name = ROLE_TO_NAME[entry.agent_type];
-    if (name) return name;
-  }
+  const byType = lookupRoleName(entry.agent_type);
+  if (byType) return byType;
   if (entry.role && entry.role !== 'boss' && entry.role !== 'client') {
-    const name = ROLE_TO_NAME[entry.role];
-    if (name) return name;
+    const byRole = lookupRoleName(entry.role);
+    if (byRole) return byRole;
   }
   return null;
 }
@@ -318,6 +322,7 @@ function handleSSEEvent(entry) {
     case 'task-create':  handleTaskCreate(entry); break;
     case 'task-update':  handleTaskUpdate(entry); break;
     case 'tasks-reset':  handleTasksReset(); break;
+    case 'session-end':  handleSessionEnd(); break;
     case 'usage-update': handleUsageUpdate(entry); break;
     default:           handleGeneric(entry); break;
   }
@@ -399,16 +404,33 @@ function handleWork(entry) {
     const tool = parseToolFromMsg(entry.msg);
     const target = parseTargetFromMsg(entry.msg);
 
-    // If agent is in break room, send them to desk first
-    if (char.isInBreakRoom) {
-      char.assignTask('working');
+    // B1d: 이미 WORKING 중이면 재할당 대신 도구/타겟만 갱신
+    // (기존: 매 work 이벤트마다 workAtDesk 재호출 → stateTimer/workTimer 리셋)
+    if (char.state === 'working') {
+      char.workTool = tool || char.workTool;
+      char.workTarget = target || char.workTarget;
+    } else {
+      if (char.isInBreakRoom) {
+        char.assignTask('working');
+      }
+      char.workAtDesk(tool, target);
     }
-    char.workAtDesk(tool, target);
   }
 
   if (entry.msg) {
     bubbles.add(name, entry.msg, 'work', 2500);
   }
+}
+
+// B1c/C4: session-end 이벤트에서 잔존 에이전트 일괄 퇴근
+function handleSessionEnd() {
+  if (!characters) return;
+  characters.forEach((char) => {
+    if (char.role === 'boss' || char._isCTeam) return;
+    if (char.state !== 'idle_break') {
+      char.completeTask();
+    }
+  });
 }
 
 function handleTalk(entry) {
@@ -658,23 +680,30 @@ function connectSSE() {
   eventSource.onerror = () => {
     renderer.connectionStatus = 'disconnected';
     updateChatIndicator('disconnected');
-    eventSource.close();
-    eventSource = null;
+    if (eventSource) { eventSource.close(); eventSource = null; }
     reconnectAttempts++;
 
-    if (reconnectAttempts >= MAX_RECONNECT) {
-      renderer.connectionStatus = 'dead';
-      showSessionEndOverlay();
-      return;
-    }
-
+    // B2: 5회 제한 제거, 무한 지수 백오프(max 60s). 탭이 활성화되어있을 때만 재연결 시도.
     clearTimeout(reconnectTimer);
+    const delay = Math.min(reconnectDelay, RECONNECT_MAX_DELAY);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, RECONNECT_MAX_DELAY);
     reconnectTimer = setTimeout(() => {
-      reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
-      connectSSE();
-    }, reconnectDelay);
+      if (document.visibilityState === 'visible') {
+        connectSSE();
+      }
+      // visibility 가 hidden 이면 visibilitychange 리스너가 재연결
+    }, delay);
   };
 }
+
+// B2: 탭 복귀 시 즉시 재연결 시도
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (eventSource) return;
+  clearTimeout(reconnectTimer);
+  reconnectDelay = 1000;
+  connectSSE();
+});
 
 // Restore agent desk positions from history (for page refresh)
 function restoreAgentStates(entries) {
