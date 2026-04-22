@@ -175,8 +175,9 @@ if [ "$tool_name" = "TaskUpdate" ]; then
     task_status=$(echo "$input" | jq -r '.tool_input.status // ""')
     task_subject=$(echo "$input" | jq -r '.tool_input.subject // ""')
 
-    # status가 있을 때만 기록 (의미 있는 상태 변경)
-    if [ -n "$task_status" ]; then
+    # 의미 있는 상태 변경만 기록 — id/status 둘 다 있어야 함.
+    # "null" 문자열도 체크 (jq 의 empty fallback 이 "null" 문자열로 올 수 있음).
+    if [ -n "$task_id" ] && [ "$task_id" != "null" ] && [ -n "$task_status" ] && [ "$task_status" != "null" ]; then
         ts=$(date '+%H:%M:%S')
         epoch=$(date '+%s')
 

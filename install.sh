@@ -238,6 +238,51 @@ fi
 # Copy plugin metadata
 [ -d "$SCRIPT_DIR/.claude-plugin" ] && cp -r "$SCRIPT_DIR/.claude-plugin" "$CACHE_DIR/"
 
+# 7. Marketplace 경로 동기화 — Claude Code 가 실제로 로드하는 경로.
+#    git remote marketplace 는 push/pull 사이클이 필요하지만,
+#    로컬 개발 중에는 이 경로를 직접 갱신해서 즉시 반영되게 한다.
+MARKETPLACE_PLUGIN_DIR="$HOME/.claude/plugins/marketplaces/backstage"
+if [ -d "$MARKETPLACE_PLUGIN_DIR" ]; then
+  echo "Syncing to marketplace plugin path (local dev reload) ..."
+  # hooks + viewer + agents + .claude-plugin 동기화
+  rsync -a --delete \
+    --exclude='node_modules' \
+    --exclude='.omc' \
+    --exclude='.git' \
+    --exclude='hooks.json.disabled' \
+    "$SCRIPT_DIR/hooks/" "$MARKETPLACE_PLUGIN_DIR/hooks/"
+  rsync -a --delete \
+    --exclude='node_modules' \
+    --exclude='.omc' \
+    "$SCRIPT_DIR/viewer/" "$MARKETPLACE_PLUGIN_DIR/viewer/"
+  [ -d "$SCRIPT_DIR/agents" ] && {
+    mkdir -p "$MARKETPLACE_PLUGIN_DIR/agents"
+    rsync -a "$SCRIPT_DIR/agents/" "$MARKETPLACE_PLUGIN_DIR/agents/"
+  }
+  [ -d "$SCRIPT_DIR/skills" ] && {
+    mkdir -p "$MARKETPLACE_PLUGIN_DIR/skills"
+    rsync -a "$SCRIPT_DIR/skills/" "$MARKETPLACE_PLUGIN_DIR/skills/"
+  }
+  [ -d "$SCRIPT_DIR/.claude-plugin" ] && cp -r "$SCRIPT_DIR/.claude-plugin" "$MARKETPLACE_PLUGIN_DIR/"
+  echo -e "  ${GREEN}✓${NC} marketplace path synced ($PLUGIN_VERSION)"
+else
+  echo -e "  ${YELLOW}⚠${NC} marketplace path not found (skip) — 로컬에 marketplace 플러그인이 설치된 경우만 갱신."
+fi
+
+# 8. Legacy 경로의 hooks.json 제거 — Claude Code 가 marketplace 경로와 중복 로드하던 문제 해결.
+#    hooks 디렉터리 자체는 유지해서 state 파일(history.jsonl 등)은 보존.
+LEGACY_HOOKS_JSON="$PLUGIN_DIR/hooks.json"
+if [ -f "$LEGACY_HOOKS_JSON" ]; then
+  rm -f "$LEGACY_HOOKS_JSON"
+  echo -e "  ${GREEN}✓${NC} legacy hooks.json 제거 (중복 훅 실행 방지)"
+fi
+# hooks 하위 디렉터리에 있을 경우도 마찬가지
+LEGACY_HOOKS_SUBDIR="$PLUGIN_DIR/hooks/hooks.json"
+if [ -f "$LEGACY_HOOKS_SUBDIR" ]; then
+  rm -f "$LEGACY_HOOKS_SUBDIR"
+  echo -e "  ${GREEN}✓${NC} legacy hooks/hooks.json 제거"
+fi
+
 echo ""
 
 # 6. Create enabled file

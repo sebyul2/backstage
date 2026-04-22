@@ -598,48 +598,74 @@ function handleGeneric(entry) {
   }
 }
 
+// Completed task 누적 상한 — 세션을 거치며 무한 쌓이던 것을 최근 N개로 제한
+const MAX_COMPLETED_TASKS = 20;
+
+function capCompletedTasks() {
+  const completed = dashboardState.tasks.filter(t => t.status === 'completed');
+  if (completed.length <= MAX_COMPLETED_TASKS) return;
+  const keep = new Set(completed.slice(-MAX_COMPLETED_TASKS));
+  dashboardState.tasks = dashboardState.tasks.filter(t => t.status !== 'completed' || keep.has(t));
+}
+
 function handleTaskCreate(entry) {
   if (!entry.data) return;
-  const task = {
-    id: entry.data.id || String(dashboardState.tasks.length + 1),
+  const incoming = {
+    id: entry.data.id || '',
     subject: entry.data.subject || 'Task',
     status: entry.data.status || 'pending',
     description: entry.data.description || '',
   };
-  // 중복 방지
-  const existing = dashboardState.tasks.find(t => t.subject === task.subject);
-  if (!existing) {
-    dashboardState.tasks.push(task);
+
+  // 같은 id 또는 같은 subject 로 이미 존재하면 merge (id 업그레이드 기회)
+  const byId = incoming.id && dashboardState.tasks.find(t => t.id === incoming.id);
+  const bySubject = !byId && dashboardState.tasks.find(t => t.subject === incoming.subject);
+  const existing = byId || bySubject;
+
+  if (existing) {
+    // id 가 비어있던 과거 엔트리에 id 주입
+    if (!existing.id && incoming.id) existing.id = incoming.id;
+    if (incoming.description && !existing.description) existing.description = incoming.description;
+    return;
   }
+
+  incoming.id = incoming.id || String(dashboardState.tasks.length + 1);
+  dashboardState.tasks.push(incoming);
+  capCompletedTasks();
 }
 
 function handleTaskUpdate(entry) {
   if (!entry.data) return;
   const { id, status, subject } = entry.data;
+  // id 와 status 모두 유효해야만 처리 (null 방어)
+  if (!id || !status) return;
 
   // ID로 찾기
   let task = dashboardState.tasks.find(t => t.id === id);
-
-  // subject로도 찾기 (ID가 없을 때)
+  // subject 로도 찾기 (같은 제목의 과거 task 와 id 연결)
   if (!task && subject) {
     task = dashboardState.tasks.find(t => t.subject === subject);
+    if (task && !task.id) task.id = id;
   }
 
-  if (task && status) {
-    // deleted 요청: completed 태스크는 유지, pending/in_progress만 제거
-    if (status === 'deleted') {
-      if (task.status !== 'completed') {
-        dashboardState.tasks = dashboardState.tasks.filter(t => t !== task);
-      }
-      return;
+  if (!task) return;
+
+  if (status === 'deleted') {
+    // completed 는 유지, 나머지는 제거
+    if (task.status !== 'completed') {
+      dashboardState.tasks = dashboardState.tasks.filter(t => t !== task);
     }
-    task.status = status;
+    return;
   }
+
+  task.status = status;
+  if (status === 'completed') capCompletedTasks();
 }
 
 function handleTasksReset() {
-  // 새 세션 시작: pending/in_progress task만 제거, completed는 유지
+  // 새 세션 시작: pending/in_progress task만 제거, completed는 유지 (상한 적용)
   dashboardState.tasks = dashboardState.tasks.filter(t => t.status === 'completed');
+  capCompletedTasks();
 }
 
 function handleUsageUpdate(entry) {
