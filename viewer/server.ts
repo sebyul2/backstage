@@ -405,11 +405,13 @@ async function getUsagePercent(): Promise<{ fiveHour: number | null; sevenDay: n
     return { fiveHour: usageApiCache.fiveHour, sevenDay: usageApiCache.sevenDay };
   }
 
-  // claude-hud 캐시 읽기 (직접 API 호출 안 함 → 429 방지)
+  // 1순위: claude-hud 캐시 (최신이면 그대로 사용)
   const hudCache = path.join(homedir(), '.claude/plugins/claude-hud/.usage-cache.json');
   try {
     const content = JSON.parse(fs.readFileSync(hudCache, 'utf-8'));
-    if (Date.now() - content.timestamp < 300_000) { // 5분 TTL
+    // 연령에 무관하게 최신 값 사용 — 사용자가 claude-hud 를 재시작하면 자동 갱신됨.
+    // null 보다는 stale 수치라도 보여주는 게 UX 상 낫다.
+    if (typeof content?.data?.fiveHour === 'number') {
       usageApiCache = { fiveHour: content.data.fiveHour, sevenDay: content.data.sevenDay, ts: Date.now() };
       return { fiveHour: content.data.fiveHour, sevenDay: content.data.sevenDay };
     }
@@ -2226,8 +2228,16 @@ const server = Bun.serve({
               seen.add(f);
               const fpath = path.join(dir, f);
               const stat = fs.statSync(fpath);
-              const firstLine = fs.readFileSync(fpath, 'utf-8').split('\n')[0] || '';
-              const title = firstLine.replace(/^#+\s*/, '').trim() || f;
+              // HTML 주석(<!-- ... -->) 행과 빈 줄은 제목 후보에서 제외하고, heading 의 # 는 완전 제거
+              const content = fs.readFileSync(fpath, 'utf-8');
+              let title = f;
+              for (const line of content.split('\n')) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                if (trimmed.startsWith('<!--')) continue;
+                title = trimmed.replace(/^#+\s*/, '').trim() || f;
+                break;
+              }
               allFiles.push({ name: f, mtime: stat.mtimeMs, title, size: stat.size, source });
               // 새 plan 을 archive 에 자동 복사 (captured/plans 둘 다)
               if (source === 'captured' || source === 'plans') {

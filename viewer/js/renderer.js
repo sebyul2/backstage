@@ -1446,29 +1446,16 @@ export class Renderer {
       bubbleManager.render(ctx, new Map([['Player', player]]));
     }
 
-    // 8. 시간대별 조명 tint (N1) — UI 위에 올림. UI 글자 가독성 위해 매우 은은하게.
-    this._drawTimeOfDayTint(ctx);
   }
 
-  // ─── 시간대별 조명 tint (N1) ─────────────────────────────────
-  // 실제 시간 기반으로 색상 overlay. 팔레트는 건드리지 않고 overlay 로만 처리 →
-  // 리소스 비용 최소화, 팔레트 일관성 유지.
-  _drawTimeOfDayTint(ctx) {
+  // 현재 시간대 카테고리 — 다른 렌더 로직이 조명 강도 참조 시 사용
+  _timeOfDay() {
     const h = new Date().getHours();
-    let color = null, alpha = 0;
-    if (h >= 5 && h < 8)      { color = '#FFB86B'; alpha = 0.10; }  // 새벽/아침: 따뜻한 주황
-    else if (h >= 8 && h < 17) { color = null;     alpha = 0;    } // 낮: 투명
-    else if (h >= 17 && h < 19) { color = '#FF7E87'; alpha = 0.12; } // 일몰: 핑크
-    else if (h >= 19 && h < 22) { color = '#6F8BFF'; alpha = 0.14; } // 저녁: 푸른빛
-    else                        { color = '#1B1C4B'; alpha = 0.22; } // 심야: 짙은 인디고
-
-    if (!color || alpha <= 0) return;
-    ctx.save();
-    ctx.globalCompositeOperation = 'source-atop'; // 캔버스 내용 위에만 blend
-    ctx.fillStyle = color;
-    ctx.globalAlpha = alpha;
-    ctx.fillRect(0, 0, MAP_W, MAP_H);
-    ctx.restore();
+    if (h >= 5 && h < 8)   return { key: 'dawn',   icon: '🌅', monitorBoost: 0.3 };
+    if (h >= 8 && h < 17)  return { key: 'day',    icon: '☀️', monitorBoost: 0 };
+    if (h >= 17 && h < 19) return { key: 'sunset', icon: '🌇', monitorBoost: 0.5 };
+    if (h >= 19 && h < 22) return { key: 'night',  icon: '🌙', monitorBoost: 1.0 };
+    return                       { key: 'deep',   icon: '🌃', monitorBoost: 1.4 };
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -1515,25 +1502,23 @@ export class Renderer {
     const ctxLabelW = ctx.measureText(' ' + ctxLabel).width;
     const barW = 100;
     const barH = 10;
-    const usageBarW = 100;
-    // Usage 계산: API 퍼센트 우선, 없으면 토큰 기반 폴백
+    const usageBarW = 60;  // 5시간/7일 바는 더 좁게
+
+    // Usage 계산: 5시간 + 7일 API 퍼센트 이원화 (null 이면 "--")
     const fiveHourPct = ctxData.fiveHourPercent;
-    let usageRatio, usageLabel;
-    if (fiveHourPct != null) {
-      usageRatio = Math.min(1, fiveHourPct / 100);
-      usageLabel = fiveHourPct + '%';
-    } else {
-      const usageTotal = (ctxData.inputTokens || 0) + (ctxData.cacheReadTokens || 0) + (ctxData.outputTokens || 0);
-      const maxUsage = 50_000_000;
-      usageRatio = Math.min(1, usageTotal / maxUsage);
-      usageLabel = formatK(usageTotal);
-    }
-    const usageLabelW = ctx.measureText(' ' + usageLabel).width;
+    const sevenDayPct = ctxData.sevenDayPercent;
+    const usage5hRatio = fiveHourPct != null ? Math.min(1, fiveHourPct / 100) : 0;
+    const usage7dRatio = sevenDayPct != null ? Math.min(1, sevenDayPct / 100) : 0;
+    const usage5hLabel = fiveHourPct != null ? fiveHourPct + '%' : '--';
+    const usage7dLabel = sevenDayPct != null ? sevenDayPct + '%' : '--';
+    const usage5hLabelW = ctx.measureText(' ' + usage5hLabel).width;
+    const usage7dLabelW = ctx.measureText(' ' + usage7dLabel).width;
 
     const statsW = ctx.measureText(statsText).width + 12;
     const ctxBarTotalW = barW + ctxLabelW + 6;
-    const usageBarTotalW = usageBarW + usageLabelW + 6;
-    const totalRightW = ctxBarTotalW + 6 + usageBarTotalW + 8 + statsW;
+    const usage5hTotalW = usageBarW + usage5hLabelW + 6;
+    const usage7dTotalW = usageBarW + usage7dLabelW + 6;
+    const totalRightW = ctxBarTotalW + 6 + usage5hTotalW + 6 + usage7dTotalW + 8 + statsW;
 
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     this._roundRect(ctx, MAP_W - totalRightW - pad, pad, totalRightW, 24, 4);
@@ -1586,38 +1571,50 @@ export class Renderer {
     ctx.textBaseline = 'middle';
     ctx.fillText(' ' + ctxLabel, barX + barW, pad + 12);
 
-    // ─── Usage 프로그래스바 ───
-    const usageBarX = barX + barW + ctxLabelW + 12;
-    // 배경
-    ctx.fillStyle = '#2D3748';
-    ctx.fillRect(usageBarX, barY, usageBarW, barH);
-    // 채우기 (파란→보라 그라데이션)
-    const usageFillW = Math.floor(usageBarW * usageRatio);
-    if (usageFillW > 0) {
-      for (let px = 0; px < usageFillW; px++) {
-        const ratio = px / usageBarW;
-        const r = Math.floor(41 + ratio * (180 - 41));
-        const g = Math.floor(128 + ratio * (80 - 128));
-        const b = Math.floor(255 - ratio * 50);
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(usageBarX + px, barY, 1, barH);
+    // ─── Usage 프로그래스바 (5시간 + 7일 이원화) ───
+    const drawUsageBar = (barXPos, label, labelText, ratio, gradientFn) => {
+      // 배경
+      ctx.fillStyle = '#2D3748';
+      ctx.fillRect(barXPos, barY, usageBarW, barH);
+      // 채우기
+      const fillW = Math.floor(usageBarW * ratio);
+      for (let px = 0; px < fillW; px++) {
+        ctx.fillStyle = gradientFn(px / usageBarW);
+        ctx.fillRect(barXPos + px, barY, 1, barH);
       }
-    }
-    // 바 가운데 "usage" 텍스트 (항상 보이게: 텍스트 아웃라인)
-    ctx.font = '8px "Menlo", "Consolas", monospace';
-    ctx.textAlign = 'center';
-    const usageCenterX = usageBarX + usageBarW / 2;
-    ctx.strokeStyle = '#1A202C';
-    ctx.lineWidth = 2.5;
-    ctx.strokeText('USAGE', usageCenterX, pad + 12);
-    ctx.fillStyle = '#E2E8F0';
-    ctx.fillText('USAGE', usageCenterX, pad + 12);
-    ctx.lineWidth = 1;
-    // Usage 수치 레이블
-    ctx.font = '10px "Menlo", "Consolas", monospace';
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#A0AEC0';
-    ctx.fillText(' ' + usageLabel, usageBarX + usageBarW, pad + 12);
+      // 바 가운데 레이블 (아웃라인)
+      ctx.font = '8px "Menlo", "Consolas", monospace';
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#1A202C';
+      ctx.lineWidth = 2.5;
+      ctx.strokeText(label, barXPos + usageBarW / 2, pad + 12);
+      ctx.fillStyle = '#E2E8F0';
+      ctx.fillText(label, barXPos + usageBarW / 2, pad + 12);
+      ctx.lineWidth = 1;
+      // 수치
+      ctx.font = '10px "Menlo", "Consolas", monospace';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = ratio >= 0.85 ? '#FC8181' : ratio >= 0.6 ? '#ECC94B' : '#A0AEC0';
+      ctx.fillText(' ' + labelText, barXPos + usageBarW, pad + 12);
+    };
+
+    // 5시간 바 (파랑→보라)
+    const usage5hX = barX + barW + ctxLabelW + 12;
+    drawUsageBar(usage5hX, '5H', usage5hLabel, usage5hRatio, (r) => {
+      const red = Math.floor(41 + r * (180 - 41));
+      const green = Math.floor(128 + r * (80 - 128));
+      const blue = Math.floor(255 - r * 50);
+      return `rgb(${red},${green},${blue})`;
+    });
+
+    // 7일 바 (주황→빨강)
+    const usage7dX = usage5hX + usageBarW + usage5hLabelW + 12;
+    drawUsageBar(usage7dX, '7D', usage7dLabel, usage7dRatio, (r) => {
+      const red = 255;
+      const green = Math.floor(165 - r * 115);
+      const blue = Math.floor(60 - r * 60);
+      return `rgb(${red},${green},${blue})`;
+    });
 
     // 에이전트 통계 텍스트
     ctx.font = '12px "Menlo", "Consolas", monospace';

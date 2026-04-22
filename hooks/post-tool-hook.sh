@@ -124,22 +124,29 @@ if [ "$tool_name" = "ExitPlanMode" ]; then
     if [ -n "$plan_content" ] && [ "$plan_content" != "null" ]; then
         plans_dir="$STATE_DIR/plans"
         mkdir -p "$plans_dir"
-        # 파일명: YYYYMMDD-HHMMSS-{slug}.md — 첫 줄을 heading 으로
-        raw_first=$(echo "$plan_content" | head -1 | sed 's/^#\+[[:space:]]*//')
-        slug=$(echo "$raw_first" | tr -cd '[:alnum:][:space:]-' | head -c 40 | tr -s ' ' '-' | tr '[:upper:]' '[:lower:]' | sed 's/-$//')
+        # 첫 줄에서 # 여러 개 + 공백 제거 (macOS sed 호환: \+ 대신 *)
+        raw_first=$(echo "$plan_content" | head -1 | sed 's/^#* *//')
+        slug=$(echo "$raw_first" | tr -cd '[:alnum:][:space:]-' | head -c 40 | tr -s ' ' '-' | tr '[:upper:]' '[:lower:]' | sed 's/-*$//')
         [ -z "$slug" ] && slug="plan"
         file="$plans_dir/$(date +%Y%m%d-%H%M%S)-${slug}.md"
+        # 파일 내용: plan_content 원문 그대로 저장. 메타는 HTML 주석(렌더링 안 됨)으로.
+        # plan 원문에 이미 heading 이 있으면 그걸 씀. 없으면 첫 줄을 heading 으로 승격.
+        has_heading=$(echo "$plan_content" | head -1 | grep -c '^#' || true)
         {
-            echo "# ${raw_first:-Plan}"
-            echo ""
-            echo "_Captured by backstage at $(date '+%Y-%m-%d %H:%M:%S')_"
-            echo ""
-            echo "$plan_content"
+            echo "<!-- backstage: captured at $(date '+%Y-%m-%d %H:%M:%S') -->"
+            if [ "$has_heading" = "0" ]; then
+                echo "# ${raw_first:-Plan}"
+                echo ""
+                # 원문의 첫 줄은 이미 heading 으로 승격됐으니 나머지만
+                echo "$plan_content" | tail -n +2
+            else
+                echo "$plan_content"
+            fi
         } > "$file"
         # history.jsonl 에도 이벤트로 알림 (뷰어 타임라인에 반영)
         ts=$(date '+%H:%M:%S')
         epoch=$(date '+%s')
-        plan_preview=$(echo "$plan_content" | head -1 | head -c 120)
+        plan_preview=$(echo "$raw_first" | head -c 120)
         jq -nc --arg ts "$ts" --arg ep "$epoch" --arg msg "$plan_preview" --arg fname "$(basename "$file")" \
             '{ts:$ts,epoch:($ep|tonumber),type:"plan-captured",speaker:"Chris",role:"boss",msg:$msg,data:{file:$fname}}' >> "$HISTORY_FILE"
     fi
