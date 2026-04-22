@@ -7,8 +7,10 @@
 exec 2>/dev/null
 
 PLUGIN_DIR="$HOME/.claude/plugins/backstage"
-HISTORY_FILE="$PLUGIN_DIR/history.jsonl"
-DEBUG_LOG="$PLUGIN_DIR/debug-hook.log"
+STATE_DIR="${CLAUDE_PLUGIN_DATA:-$PLUGIN_DIR}"
+mkdir -p "$STATE_DIR"
+HISTORY_FILE="$STATE_DIR/history.jsonl"
+DEBUG_LOG="$STATE_DIR/debug-hook.log"
 
 input=$(cat)
 # SubagentStop 입력은 subagent_type / agent_type / subagent.name 등 다양한 키로 올 수 있음

@@ -10,8 +10,9 @@
 exec 2>/dev/null
 
 PLUGIN_DIR="$HOME/.claude/plugins/backstage"
-DEBUG_LOG="$PLUGIN_DIR/debug-hook.log"
-PENDING_STEPS_FILE="$PLUGIN_DIR/pending-steps.jsonl"
+STATE_DIR="${CLAUDE_PLUGIN_DATA:-$PLUGIN_DIR}"
+DEBUG_LOG="$STATE_DIR/debug-hook.log"
+PENDING_STEPS_FILE="$STATE_DIR/pending-steps.jsonl"
 
 # I6: debug-hook.log 가 5MB 초과하면 tail 2000 줄만 남기고 rotate (턴당 stat 1회)
 if [ -f "$DEBUG_LOG" ]; then

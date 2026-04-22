@@ -20,13 +20,19 @@ try { i18n = JSON.parse(fs.readFileSync(I18N_PATH, 'utf-8')); } catch {
 const SERVER_START_TIME = Date.now();
 const SERVER_START_EPOCH = Math.floor(SERVER_START_TIME / 1000);
 const PLUGIN_DIR = path.join(homedir(), ".claude/plugins/backstage");
+// C7: State files optionally live in $CLAUDE_PLUGIN_DATA so they persist
+// across plugin updates. Falls back to $PLUGIN_DIR, preserving prior behavior.
+const STATE_DIR = process.env.CLAUDE_PLUGIN_DATA || PLUGIN_DIR;
+try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch {}
+
 const HISTORY_FILE =
   process.env.BACKSTAGE_HISTORY ||
-  path.join(PLUGIN_DIR, "history.jsonl");
+  path.join(STATE_DIR, "history.jsonl");
 
-const CHRIS_LOG_FILE = path.join(PLUGIN_DIR, "chris-log.jsonl");
-const DIALOGUE_QUEUE_FILE = path.join(PLUGIN_DIR, "dialogue-queue.jsonl");
-const IMAGES_DIR = path.join(PLUGIN_DIR, "images");
+const CHRIS_LOG_FILE = path.join(STATE_DIR, "chris-log.jsonl");
+const DIALOGUE_QUEUE_FILE = path.join(STATE_DIR, "dialogue-queue.jsonl");
+const IMAGES_DIR = path.join(STATE_DIR, "images");
+const THINKING_SNAPSHOTS_DIR = path.join(STATE_DIR, "thinking-snapshots");
 
 // 이미지 저장: base64 → 파일, 파일명 반환
 function saveImage(base64Data: string, mediaType: string): string | null {
@@ -465,6 +471,32 @@ function thinkingCacheSet(msgId: string, content: string): void {
     if (oldest !== undefined) thinkingCache.delete(oldest);
   }
 }
+
+// C3: PreCompact hook 이 남긴 thinking-snapshots 를 서버 시작 시 읽어 cache 에 주입.
+// compaction 후 transcript 가 thinking 을 redact 해도 snapshot 으로 복원 가능.
+function loadThinkingSnapshots(): number {
+  try {
+    if (!fs.existsSync(THINKING_SNAPSHOTS_DIR)) return 0;
+    const files = fs.readdirSync(THINKING_SNAPSHOTS_DIR).filter(f => f.endsWith('.jsonl'));
+    let loaded = 0;
+    for (const f of files) {
+      try {
+        const content = fs.readFileSync(path.join(THINKING_SNAPSHOTS_DIR, f), 'utf-8');
+        for (const line of content.split('\n')) {
+          if (!line.trim()) continue;
+          try {
+            const entry = JSON.parse(line);
+            if (entry.msgId && typeof entry.thinking === 'string' && entry.thinking.length > 30) {
+              thinkingCacheSet(entry.msgId, entry.thinking);
+              loaded++;
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+    return loaded;
+  } catch { return 0; }
+}
 let transcriptWatcher: fs.FSWatcher | null = null;
 
 function setupTranscriptWatcher(): void {
@@ -488,7 +520,7 @@ const AGENT_IDLE_TIMEOUT = 30_000; // 30 seconds without activity → auto "done
 const chrisLogCache: { key: string; entries: any[] } = { key: '', entries: [] };
 
 // Server startup cleanup: remove stale agent data from previous sessions
-try { fs.unlinkSync(path.join(PLUGIN_DIR, 'active-agent.json')); } catch {}
+try { fs.unlinkSync(path.join(STATE_DIR, 'active-agent.json')); } catch {}
 
 // Clean history.jsonl: remove volatile events (agent-status, work, idle-chat) but keep persistent ones
 try {
@@ -823,7 +855,7 @@ function findCurrentTranscript(): string | null {
   // hook이 기록한 활성 세션의 cwd 읽기 → 해당 프로젝트의 transcript만 선택
   let activeCwdEncoded = '';
   try {
-    const cwdFile = path.join(PLUGIN_DIR, 'active-session-cwd.txt');
+    const cwdFile = path.join(STATE_DIR, 'active-session-cwd.txt');
     if (fs.existsSync(cwdFile)) {
       const cwd = fs.readFileSync(cwdFile, 'utf-8').trim();
       // Claude Code는 cwd의 /를 -로 인코딩: /Users/aster/workspace/foo → -Users-aster-workspace-foo
@@ -2241,7 +2273,7 @@ const server = Bun.serve({
               // hook 기반 pending-steps (tool 사용 직후 기록되므로 transcript 완료 전에도 실시간 갱신)
               let hookSteps: any[] = [];
               try {
-                const psFile = path.join(PLUGIN_DIR, 'pending-steps.jsonl');
+                const psFile = path.join(STATE_DIR, 'pending-steps.jsonl');
                 if (fs.existsSync(psFile)) {
                   const psContent = fs.readFileSync(psFile, 'utf-8').trim();
                   if (psContent) {
@@ -2796,6 +2828,17 @@ const claudeSessionTimer = setInterval(() => {
   refreshActiveClaudeSessions();
 }, 30_000);
 
+// C3: 서버 시작 시 PreCompact snapshot 을 thinkingCache 에 주입
+(() => {
+  const n = loadThinkingSnapshots();
+  if (n > 0) console.log(`[think-snapshot] loaded ${n} entries from ${THINKING_SNAPSHOTS_DIR}`);
+})();
+
+// C3: 5분마다 snapshot 디렉터리 재스캔 (서버 실행 중 PreCompact 가 fire 된 경우 반영)
+const thinkingSnapshotTimer = setInterval(() => {
+  try { loadThinkingSnapshots(); } catch {}
+}, 5 * 60 * 1000);
+
 // I2: history.jsonl rotate — 5분마다 크기 검사, 10MB 초과 시 최신 50% 만 유지
 const HISTORY_ROTATE_THRESHOLD = 10 * 1024 * 1024; // 10MB
 const historyRotateTimer = setInterval(() => {
@@ -2847,6 +2890,8 @@ function shutdown(): void {
   clearInterval(dialogueQueueTimer);
   clearInterval(claudeSessionTimer);
   clearInterval(idleCheckTimer);
+  clearInterval(thinkingSnapshotTimer);
+  clearInterval(historyRotateTimer);
   for (const conn of activeConnections) {
     conn.close();
   }

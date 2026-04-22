@@ -7,13 +7,17 @@
 exec 2>/dev/null
 
 PLUGIN_DIR="${BACKSTAGE_DIR:-$HOME/.claude/plugins/backstage}"
-HISTORY_FILE="$PLUGIN_DIR/history.jsonl"
-ACTIVE_AGENT_FILE="$PLUGIN_DIR/active-agent.json"
-DEBUG_LOG="$PLUGIN_DIR/debug-hook.log"
-DIALOGUE_QUEUE_FILE="$PLUGIN_DIR/dialogue-queue.jsonl"
-C_TEAM_POOL_FILE="$PLUGIN_DIR/c-team-pool.json"
+# C7: state files in $CLAUDE_PLUGIN_DATA when provided, else fall back to PLUGIN_DIR
+STATE_DIR="${CLAUDE_PLUGIN_DATA:-$PLUGIN_DIR}"
+mkdir -p "$STATE_DIR"
 
-# i18n loading
+HISTORY_FILE="$STATE_DIR/history.jsonl"
+ACTIVE_AGENT_FILE="$STATE_DIR/active-agent.json"
+DEBUG_LOG="$STATE_DIR/debug-hook.log"
+DIALOGUE_QUEUE_FILE="$STATE_DIR/dialogue-queue.jsonl"
+C_TEAM_POOL_FILE="$STATE_DIR/c-team-pool.json"
+
+# i18n loading (static plugin resource)
 _LANG=$(cat "$PLUGIN_DIR/config.json" 2>/dev/null | jq -r '.language // "en"')
 _I18N="$PLUGIN_DIR/hooks-i18n/${_LANG}.json"
 [ ! -f "$_I18N" ] && _I18N="$PLUGIN_DIR/hooks-i18n/en.json"
@@ -276,7 +280,7 @@ if [ "$tool_name" = "Task" ] || [ "$tool_name" = "Agent" ]; then
 fi
 
 # ── Pending Steps 기록 (chris-log 실시간 갱신용) ────────────────────────────
-PENDING_STEPS_FILE="$PLUGIN_DIR/pending-steps.jsonl"
+PENDING_STEPS_FILE="$STATE_DIR/pending-steps.jsonl"
 case "$tool_name" in
     Read|Edit|Grep|Glob|Write|Bash)
         _ps_detail=""
@@ -360,7 +364,7 @@ case "$tool_name" in
 esac
 
 # ── C-Team AI 대화 + 데이터 (최소 30초 간격, 각 도구 담당 캐릭터가 대화) ──
-C_BUBBLE_LAST_FILE="$PLUGIN_DIR/c-bubble-last-epoch.txt"
+C_BUBBLE_LAST_FILE="$STATE_DIR/c-bubble-last-epoch.txt"
 C_BUBBLE_INTERVAL=30
 
 case "$tool_name" in

@@ -9,8 +9,12 @@
 [ "$BACKSTAGE_DIALOGUE" = "1" ] && echo '{"continue": true}' && exit 0
 
 PLUGIN_DIR="${BACKSTAGE_DIR:-$HOME/.claude/plugins/backstage}"
+# C7: state vs. resource split
+STATE_DIR="${CLAUDE_PLUGIN_DATA:-$PLUGIN_DIR}"
+mkdir -p "$STATE_DIR"
+
 CHARACTERS_FILE="$PLUGIN_DIR/characters.json"
-HISTORY_FILE="$PLUGIN_DIR/history.jsonl"
+HISTORY_FILE="$STATE_DIR/history.jsonl"
 
 # stdin에서 JSON 입력 읽기
 input=$(cat)
@@ -69,7 +73,7 @@ if echo "$prompt" | grep -qE "^당신은 판교 IT 스타트업 대화 생성기
 fi
 
 # pending-steps 초기화 (새 질문 시작 → 이전 tool steps 정리)
-PENDING_STEPS_FILE="$PLUGIN_DIR/pending-steps.jsonl"
+PENDING_STEPS_FILE="$STATE_DIR/pending-steps.jsonl"
 > "$PENDING_STEPS_FILE" 2>/dev/null
 
 timestamp=$(date '+%H:%M:%S')

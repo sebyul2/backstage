@@ -7,11 +7,13 @@
 exec 2>/dev/null
 
 PLUGIN_DIR="$HOME/.claude/plugins/backstage"
-ACTIVE_AGENT_FILE="$PLUGIN_DIR/active-agent.json"
-PENDING_STEPS_FILE="$PLUGIN_DIR/pending-steps.jsonl"
-DIALOGUE_QUEUE_FILE="$PLUGIN_DIR/dialogue-queue.jsonl"
-DEBUG_LOG="$PLUGIN_DIR/debug-hook.log"
-HISTORY_FILE="$PLUGIN_DIR/history.jsonl"
+STATE_DIR="${CLAUDE_PLUGIN_DATA:-$PLUGIN_DIR}"
+mkdir -p "$STATE_DIR"
+ACTIVE_AGENT_FILE="$STATE_DIR/active-agent.json"
+PENDING_STEPS_FILE="$STATE_DIR/pending-steps.jsonl"
+DIALOGUE_QUEUE_FILE="$STATE_DIR/dialogue-queue.jsonl"
+DEBUG_LOG="$STATE_DIR/debug-hook.log"
+HISTORY_FILE="$STATE_DIR/history.jsonl"
 
 mkdir -p "$(dirname "$DEBUG_LOG")"
 echo "[$(date '+%H:%M:%S')] session-end" >> "$DEBUG_LOG"
