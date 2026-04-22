@@ -116,6 +116,35 @@ for m in re.finditer(r'\{', text):
     echo ""
 }
 
+# ── ExitPlanMode 캡처 (Claude Code v2.1.105+ 는 파일 자동 저장 안 함) ────
+# Plan Mode 종료 시 tool_input.plan 을 ${STATE_DIR}/plans/ 에 .md 로 저장.
+# 서버 /plans 엔드포인트가 이 디렉터리를 1순위로 스캔.
+if [ "$tool_name" = "ExitPlanMode" ]; then
+    plan_content=$(echo "$input" | jq -r '.tool_input.plan // ""')
+    if [ -n "$plan_content" ] && [ "$plan_content" != "null" ]; then
+        plans_dir="$STATE_DIR/plans"
+        mkdir -p "$plans_dir"
+        # 파일명: YYYYMMDD-HHMMSS-{slug}.md — 첫 줄을 heading 으로
+        raw_first=$(echo "$plan_content" | head -1 | sed 's/^#\+[[:space:]]*//')
+        slug=$(echo "$raw_first" | tr -cd '[:alnum:][:space:]-' | head -c 40 | tr -s ' ' '-' | tr '[:upper:]' '[:lower:]' | sed 's/-$//')
+        [ -z "$slug" ] && slug="plan"
+        file="$plans_dir/$(date +%Y%m%d-%H%M%S)-${slug}.md"
+        {
+            echo "# ${raw_first:-Plan}"
+            echo ""
+            echo "_Captured by backstage at $(date '+%Y-%m-%d %H:%M:%S')_"
+            echo ""
+            echo "$plan_content"
+        } > "$file"
+        # history.jsonl 에도 이벤트로 알림 (뷰어 타임라인에 반영)
+        ts=$(date '+%H:%M:%S')
+        epoch=$(date '+%s')
+        plan_preview=$(echo "$plan_content" | head -1 | head -c 120)
+        jq -nc --arg ts "$ts" --arg ep "$epoch" --arg msg "$plan_preview" --arg fname "$(basename "$file")" \
+            '{ts:$ts,epoch:($ep|tonumber),type:"plan-captured",speaker:"Chris",role:"boss",msg:$msg,data:{file:$fname}}' >> "$HISTORY_FILE"
+    fi
+fi
+
 # ── TaskCreate 이벤트 기록 ────────────────────────────────────────
 if [ "$tool_name" = "TaskCreate" ]; then
     task_subject=$(echo "$input" | jq -r '.tool_input.subject // ""')

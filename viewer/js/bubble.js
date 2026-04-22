@@ -38,6 +38,10 @@ class Bubble {
     this.width = 0;
     this.height = 0;
     this._measured = false;
+    // N3: typewriter 효과 — 긴 메시지만 적용
+    this.totalChars = text.length;
+    this.typedChars = 0;
+    this.typing = text.length >= 15 && (type === 'talk' || type === 'assign' || type === 'done' || type === 'update');
   }
 
   measure(ctx) {
@@ -74,6 +78,10 @@ class Bubble {
       case 'show':
         this.scale = 1;
         this.alpha = 1;
+        // N3: 타자 애니메이션 — 초당 ~33자 (30ms/char). 너무 빠르지도 느리지도 않게.
+        if (this.typing && this.typedChars < this.totalChars) {
+          this.typedChars = Math.min(this.totalChars, this.typedChars + dt * 1000 / 30);
+        }
         if (this.elapsed >= this.duration) {
           this.phase = 'fade';
           this.elapsed = 0;
@@ -182,7 +190,7 @@ export class BubbleManager {
     items.sort((a, b) => b.char.y - a.char.y);
 
     const placed = []; // [{x, y, w, h}]
-    for (const { bubble, char } of items) {
+    for (const { name, bubble, char } of items) {
       const cx = char.x;
       let cy = char.y - 32;
       // 충돌 회피: 이미 배치된 bubble box와 겹치면 18px 씩 위로
@@ -201,13 +209,35 @@ export class BubbleManager {
         attempts++;
       }
       this._drawBubble(ctx, bubble, cx, cy);
-      placed.push({
-        x: cx - bubble.width / 2,
-        y: cy - bubble.height - BUBBLE_TAIL_H,
-        w: bubble.width,
-        h: bubble.height,
-      });
+      const bx = cx - bubble.width / 2;
+      const by = cy - bubble.height - BUBBLE_TAIL_H;
+      placed.push({ x: bx, y: by, w: bubble.width, h: bubble.height });
+
+      // F4: 큐 뱃지 — 대기 중 2개 이상이면 우측 상단에 작은 원형 카운터
+      const q = this.queues.get(name);
+      const pending = q ? q.length : 0;
+      if (pending >= 2) {
+        this._drawQueueBadge(ctx, bx + bubble.width - 4, by - 4, pending);
+      }
     }
+  }
+
+  _drawQueueBadge(ctx, cx, cy, count) {
+    ctx.save();
+    ctx.fillStyle = '#FF77A8';  // PICO-8 핑크
+    ctx.strokeStyle = '#1D2B53';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#FFF1E8';
+    ctx.font = 'bold 10px "Menlo", "Consolas", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = count > 9 ? '9+' : String(count);
+    ctx.fillText(label, cx, cy + 0.5);
+    ctx.restore();
   }
 
   _drawBubble(ctx, bubble, cx, cy) {
@@ -261,12 +291,37 @@ export class BubbleManager {
     ctx.fillStyle = colors.bg;
     ctx.fillRect(cx - 3, by + height - 1, 6, 2);
 
-    // Text
+    // Text — N3: 타이핑 진행에 따라 visible chars 계산
     ctx.fillStyle = colors.text;
     ctx.font = `${BUBBLE_FONT_SIZE}px "Menlo", "Consolas", monospace`;
     ctx.textBaseline = 'top';
+    let visibleBudget = bubble.typing ? Math.floor(bubble.typedChars) : Infinity;
     for (let i = 0; i < lines.length; i++) {
-      ctx.fillText(lines[i], bx + BUBBLE_PAD, by + BUBBLE_PAD + i * BUBBLE_LINE_H);
+      if (visibleBudget <= 0) break;
+      const line = lines[i];
+      const displayLine = visibleBudget >= line.length ? line : line.slice(0, visibleBudget);
+      ctx.fillText(displayLine, bx + BUBBLE_PAD, by + BUBBLE_PAD + i * BUBBLE_LINE_H);
+      visibleBudget -= line.length;
+    }
+    // 커서 (타이핑 중에만)
+    if (bubble.typing && bubble.typedChars < bubble.totalChars) {
+      const totalVisible = Math.floor(bubble.typedChars);
+      // 커서 위치 — 마지막 글자 뒤에 ▌ 블록
+      let consumed = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const lineLen = lines[i].length;
+        if (consumed + lineLen >= totalVisible) {
+          const offset = totalVisible - consumed;
+          const textWidth = ctx.measureText(lines[i].slice(0, offset)).width;
+          const blink = Math.floor(Date.now() / 400) % 2;
+          if (blink) {
+            ctx.fillStyle = colors.text;
+            ctx.fillRect(bx + BUBBLE_PAD + textWidth, by + BUBBLE_PAD + i * BUBBLE_LINE_H + 2, 2, BUBBLE_FONT_SIZE);
+          }
+          break;
+        }
+        consumed += lineLen;
+      }
     }
 
     ctx.restore();

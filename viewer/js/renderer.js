@@ -1203,8 +1203,15 @@ export class Renderer {
 
   _drawCharacter(ctx, char, isPlayer) {
     if (!char.sprite) return;
+    // F1: 퇴근한 캐릭터는 그리지 않음
+    if (char._offscreen) return;
     const frame = char.getFrameRect();
     if (!frame) return;
+    // F1: 퇴장 페이드 중이면 전체 alpha 적용
+    const prevAlpha = ctx.globalAlpha;
+    if (typeof char.alpha === 'number' && char.alpha < 1) {
+      ctx.globalAlpha = prevAlpha * char.alpha;
+    }
 
     // ── Clickable glow effect (Chris only) ──
     if (char.name === 'Chris') {
@@ -1263,6 +1270,8 @@ export class Renderer {
       ctx.globalAlpha = 1;
       ctx.textAlign = 'left';
     }
+    // F1: restore alpha
+    ctx.globalAlpha = prevAlpha;
     // Name tag and work indicator drawn in separate top-layer pass
   }
 
@@ -1436,6 +1445,30 @@ export class Renderer {
     if (player) {
       bubbleManager.render(ctx, new Map([['Player', player]]));
     }
+
+    // 8. 시간대별 조명 tint (N1) — UI 위에 올림. UI 글자 가독성 위해 매우 은은하게.
+    this._drawTimeOfDayTint(ctx);
+  }
+
+  // ─── 시간대별 조명 tint (N1) ─────────────────────────────────
+  // 실제 시간 기반으로 색상 overlay. 팔레트는 건드리지 않고 overlay 로만 처리 →
+  // 리소스 비용 최소화, 팔레트 일관성 유지.
+  _drawTimeOfDayTint(ctx) {
+    const h = new Date().getHours();
+    let color = null, alpha = 0;
+    if (h >= 5 && h < 8)      { color = '#FFB86B'; alpha = 0.10; }  // 새벽/아침: 따뜻한 주황
+    else if (h >= 8 && h < 17) { color = null;     alpha = 0;    } // 낮: 투명
+    else if (h >= 17 && h < 19) { color = '#FF7E87'; alpha = 0.12; } // 일몰: 핑크
+    else if (h >= 19 && h < 22) { color = '#6F8BFF'; alpha = 0.14; } // 저녁: 푸른빛
+    else                        { color = '#1B1C4B'; alpha = 0.22; } // 심야: 짙은 인디고
+
+    if (!color || alpha <= 0) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-atop'; // 캔버스 내용 위에만 blend
+    ctx.fillStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.fillRect(0, 0, MAP_W, MAP_H);
+    ctx.restore();
   }
 
   // ═══════════════════════════════════════════════════════════════

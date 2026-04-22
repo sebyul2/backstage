@@ -2204,6 +2204,10 @@ const server = Bun.serve({
         return await handleCharacters();
       case "/plans": {
         try {
+          // Claude Code v2.1.105+ 는 Plan Mode 결과를 파일로 저장하지 않음.
+          // backstage 가 ExitPlanMode 훅으로 직접 캡처한 $STATE_DIR/plans/ 를 1순위로 스캔.
+          // 레거시 ~/.claude/plans/ 디렉터리와 기존 plan-archive/ 도 함께 표시.
+          const capturedDir = path.join(STATE_DIR, 'plans');
           const plansDir = path.join(process.env.HOME || '', '.claude', 'plans');
           const archiveDir = path.join(PLUGIN_DIR, 'plan-archive');
           const jsonHeaders = { 'Content-Type': 'application/json', ...CORS_HEADERS };
@@ -2211,11 +2215,11 @@ const server = Bun.serve({
           // plan-archive 디렉토리 생성
           if (!fs.existsSync(archiveDir)) fs.mkdirSync(archiveDir, { recursive: true });
 
-          // 양쪽 디렉토리에서 .md 파일 수집
+          // 세 디렉토리에서 .md 파일 수집 (captured 우선, 그 다음 legacy, archive)
           const allFiles: { name: string; mtime: number; title: string; size: number; source: string }[] = [];
           const seen = new Set<string>();
 
-          for (const [dir, source] of [[plansDir, 'plans'], [archiveDir, 'archive']] as const) {
+          for (const [dir, source] of [[capturedDir, 'captured'], [plansDir, 'plans'], [archiveDir, 'archive']] as const) {
             if (!fs.existsSync(dir)) continue;
             for (const f of fs.readdirSync(dir)) {
               if (!f.endsWith('.md') || seen.has(f)) continue;
@@ -2225,8 +2229,8 @@ const server = Bun.serve({
               const firstLine = fs.readFileSync(fpath, 'utf-8').split('\n')[0] || '';
               const title = firstLine.replace(/^#+\s*/, '').trim() || f;
               allFiles.push({ name: f, mtime: stat.mtimeMs, title, size: stat.size, source });
-              // 새 plan을 archive에 자동 복사
-              if (source === 'plans') {
+              // 새 plan 을 archive 에 자동 복사 (captured/plans 둘 다)
+              if (source === 'captured' || source === 'plans') {
                 const archivePath = path.join(archiveDir, f);
                 if (!fs.existsSync(archivePath)) {
                   try { fs.copyFileSync(fpath, archivePath); } catch {}
@@ -2508,11 +2512,13 @@ const server = Bun.serve({
         if (url.pathname.startsWith("/plan/")) {
           try {
             const fileName = decodeURIComponent(url.pathname.slice(6));
+            const capturedDir = path.join(STATE_DIR, 'plans');
             const plansDir = path.join(process.env.HOME || '', '.claude', 'plans');
             const archiveDir = path.join(PLUGIN_DIR, 'plan-archive');
             const jsonHeaders = { 'Content-Type': 'application/json', ...CORS_HEADERS };
 
-            let filePath = path.join(plansDir, fileName);
+            let filePath = path.join(capturedDir, fileName);
+            if (!fs.existsSync(filePath)) filePath = path.join(plansDir, fileName);
             if (!fs.existsSync(filePath)) filePath = path.join(archiveDir, fileName);
             if (!fs.existsSync(filePath)) {
               return new Response(JSON.stringify({ error: 'not found' }), { status: 404, headers: jsonHeaders });

@@ -41,6 +41,12 @@ let spaceJustPressed = false;
 let lastWhipTime = 0;
 
 document.addEventListener('keydown', (e) => {
+  // F6: Shift+D 로 디버그 HUD 토글
+  if (e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+    toggleDebugHUD();
+    e.preventDefault();
+    return;
+  }
   switch (e.key) {
     case 'ArrowUp':    case 'w': case 'W': keys.up = true; e.preventDefault(); break;
     case 'ArrowDown':  case 's': case 'S': keys.down = true; e.preventDefault(); break;
@@ -420,6 +426,70 @@ function handleWork(entry) {
   if (entry.msg) {
     bubbles.add(name, entry.msg, 'work', 2500);
   }
+}
+
+// F6: Debug HUD (Shift+D 토글) — 실시간 게임 상태 오버레이
+let debugHudEl = null;
+let debugHudTimer = null;
+function toggleDebugHUD() {
+  if (debugHudEl) {
+    debugHudEl.remove();
+    debugHudEl = null;
+    if (debugHudTimer) { clearInterval(debugHudTimer); debugHudTimer = null; }
+    return;
+  }
+  const el = document.createElement('div');
+  el.style.cssText = `
+    position: fixed; top: 8px; right: 8px; z-index: 9999;
+    background: rgba(13, 17, 23, 0.92); color: #00E436;
+    font: 11px "Menlo", "Consolas", monospace;
+    padding: 8px 10px; border: 1px solid #29ADFF; border-radius: 4px;
+    min-width: 200px; line-height: 1.5;
+    pointer-events: none; white-space: pre;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  `;
+  document.body.appendChild(el);
+  debugHudEl = el;
+
+  // FPS sampling
+  let fpsFrames = 0, fpsLastT = performance.now(), fpsValue = 0;
+  const fpsTick = () => {
+    fpsFrames++;
+    const now = performance.now();
+    if (now - fpsLastT >= 500) {
+      fpsValue = Math.round((fpsFrames * 1000) / (now - fpsLastT));
+      fpsFrames = 0; fpsLastT = now;
+    }
+    if (debugHudEl) requestAnimationFrame(fpsTick);
+  };
+  requestAnimationFrame(fpsTick);
+
+  debugHudTimer = setInterval(() => {
+    if (!debugHudEl) return;
+    const chars = characters ? [...characters.values()] : [];
+    const working = chars.filter(c => c.state === 'working').length;
+    const idleBreak = chars.filter(c => c.state === 'idle_break').length;
+    const offscreen = chars.filter(c => c._offscreen).length;
+    const bubbleActive = bubbles?.active?.size || 0;
+    let bubbleQueued = 0;
+    if (bubbles?.queues) for (const q of bubbles.queues.values()) bubbleQueued += q.length;
+    const sseStatus = renderer?.connectionStatus || '?';
+    const tasksTotal = dashboardState.tasks.length;
+    const ctxPct = dashboardState.usage.maxContext
+      ? Math.round((dashboardState.usage.lastTurnContext / dashboardState.usage.maxContext) * 100)
+      : 0;
+
+    el.textContent =
+      `━━━ BACKSTAGE DEBUG ━━━\n` +
+      `FPS       : ${fpsValue}\n` +
+      `SSE       : ${sseStatus}\n` +
+      `Chars     : ${chars.length}  (work:${working}  brk:${idleBreak}  off:${offscreen})\n` +
+      `Bubbles   : ${bubbleActive} active / ${bubbleQueued} queued\n` +
+      `Tasks     : ${tasksTotal}\n` +
+      `Context   : ${ctxPct}%  (${Math.round(dashboardState.usage.lastTurnContext / 1000)}k / ${Math.round(dashboardState.usage.maxContext / 1000)}k)\n` +
+      `Reconnect : ${reconnectAttempts} (delay ${Math.round(reconnectDelay)}ms)\n` +
+      `[Shift+D] to hide`;
+  }, 250);
 }
 
 // B1c/C4: session-end 이벤트에서 잔존 에이전트 일괄 퇴근

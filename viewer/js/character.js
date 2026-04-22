@@ -33,6 +33,10 @@ const ARRIVE_DIST = 6;
 // - 클라이언트: AGENT_ABSOLUTE_TTL = 120s (assign 시점부터 재진입 영향 없음)
 //   → 서버 신호가 유실되거나 훅 비활성 상태여도 반드시 퇴근시키는 마지막 방어선.
 const AGENT_ABSOLUTE_TTL = 120_000;
+
+// F1: Break room auto-leave — IDLE_BREAK 에서 N초 이상 누적 활동 없으면 fade out
+const AUTO_LEAVE_MS = 150_000;     // 휴게실에서 2.5분 idle 이면 퇴장 시작
+const FADE_OUT_MS = 2_000;         // 2초에 걸쳐 alpha 0 으로
 const DOOR_X = 14.5 * TILE_SIZE;
 const DOOR_Y = 7.5 * TILE_SIZE;
 
@@ -115,6 +119,12 @@ export class Character {
 
     // Stun timer: blocks all state logic while > 0 (used by whip knockback)
     this.stunTimer = 0;
+
+    // F1: auto-leave state
+    this.alpha = 1;                // 렌더 시 곱해지는 투명도
+    this._offscreen = false;        // true 면 드로우/충돌 제외
+    this._idleBreakAccum = 0;       // IDLE_BREAK 누적 시간 (ms)
+    this._fadeStart = 0;            // fade 시작 시각 (performance)
 
     // Stuck detection: position history sampled every STUCK_CHECK_INTERVAL ms
     this._posHistory = [];      // Array of {x, y} snapshots
@@ -270,6 +280,11 @@ export class Character {
     this.active = true;
     // I3: Absolute lifetime TTL — assign 시점부터. 재진입으로 리셋 안 됨.
     this.lifetimeDeadline = ts + AGENT_ABSOLUTE_TTL;
+    // F1: 퇴장 상태에서 재등장
+    this._offscreen = false;
+    this.alpha = 1;
+    this._idleBreakAccum = 0;
+    this._fadeStart = 0;
   }
 
   // Complete current task — walk back to break room (idempotent)
@@ -366,6 +381,27 @@ export class Character {
         break;
 
       case S.IDLE_BREAK:
+        // F1: 휴게실 idle 누적 시간 추적 + 페이드 아웃
+        if (!this._isCTeam && this.role !== 'boss' && this.role !== 'player') {
+          this._idleBreakAccum += dt * 1000;
+          if (this._offscreen) {
+            // 이미 퇴장 — 아무것도 안 함
+          } else if (this._fadeStart > 0) {
+            // 페이드 진행 중
+            const elapsed = Date.now() - this._fadeStart;
+            this.alpha = Math.max(0, 1 - elapsed / FADE_OUT_MS);
+            if (elapsed >= FADE_OUT_MS) {
+              this._offscreen = true;
+              this.alpha = 0;
+              this.active = false;
+            }
+            break; // wander 건너뛰기
+          } else if (this._idleBreakAccum >= AUTO_LEAVE_MS) {
+            // 페이드 시작
+            this._fadeStart = Date.now();
+            break;
+          }
+        }
         // Agent in break room — occasionally wander or interact with furniture
         if (this.stateTimer >= this.idleDelay) {
           const target = this._pickBreakWanderTarget();
@@ -374,6 +410,7 @@ export class Character {
           this._pendingInteraction = target.interaction || null;
           this.state = S.WALKING_BREAK;
           this.stateTimer = 0;
+          this._idleBreakAccum = 0; // wander 시작 시 누적 리셋
         }
         break;
 
