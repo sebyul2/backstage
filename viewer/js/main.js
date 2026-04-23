@@ -964,8 +964,15 @@ function init() {
   physics.addCharacter('Player', player.x, player.y, { radius: 12 });
 
   // Wall collision effects: 쿵 bounce + particles
+  // 벽 충돌 쿨다운 — 짧은 시간 내 중복 처리 방지 (Matter.js 가 연속 충돌 이벤트 발화)
+  const wallHitCooldown = new Map();
   physics.onWallHit((name, x, y, speed) => {
     if (name === 'Player') return;
+    const now = performance.now();
+    const last = wallHitCooldown.get(name) || 0;
+    if (now - last < 600) return; // 0.6초 쿨다운
+    wallHitCooldown.set(name, now);
+
     if (particles) {
       particles.spawn(x, y - 15, '💫');
       if (speed > 8) particles.spawn(x, y - 10, '😵');
@@ -974,6 +981,13 @@ function init() {
     if (char && speed > 5) {
       const msgs = window.i18n?.wall_collisions || ['Ouch!'];
       bubbles.add(name, msgs[Math.floor(Math.random() * msgs.length)], 'talk', 1500);
+    }
+    // 벽에 부딪혔으면 현재 경로가 잘못됐을 가능성 — path 리셋해서 다음 프레임에 A* 재탐색.
+    // stuck detection 이 1초 후에야 반응하는 것을 즉시 보완.
+    if (char && !char._isCTeam && char.role !== 'boss') {
+      char.path = null;
+      char.pathIndex = 0;
+      char._posHistory = [];
     }
   });
 

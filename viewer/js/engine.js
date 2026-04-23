@@ -1,4 +1,7 @@
-// engine.js — Game loop (30fps fixed), update/render separation
+// engine.js — Game loop (60fps fixed), update/render separation
+// 캐릭터 이동 smoothness 를 위해 update 를 render rate (보통 60Hz) 에 맞춤.
+// 이동 공식이 모두 `speed * dt` 기반이라 timestep 을 올려도 거동은 동일,
+// 초당 샘플 수만 2배로 증가 → 30fps 때 "뚝뚝" 끊기던 느낌 제거.
 
 export class GameEngine {
   constructor(canvas, logicalW, logicalH) {
@@ -7,7 +10,7 @@ export class GameEngine {
     this.running = false;
     this.lastTime = 0;
     this.accumulator = 0;
-    this.frameTime = 1000 / 30; // 30fps
+    this.frameTime = 1000 / 60; // 60fps
     this.updateCallbacks = [];
     this.renderCallbacks = [];
     this.rafId = null;

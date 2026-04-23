@@ -1,12 +1,18 @@
 {
   "name": "backstage",
   "description": "IT startup office pixel art viewer - watch AI agents work in a Gather Town style office",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "author": {
     "name": "aster"
   },
   "homepage": "https://github.com/sebyul2/backstage",
   "repository": "https://github.com/sebyul2/backstage",
   "license": "MIT",
-  "keywords": ["pixel-art", "office", "agents", "viewer", "dialogue"]
+  "keywords": [
+    "pixel-art",
+    "office",
+    "agents",
+    "viewer",
+    "dialogue"
+  ]
 }

@@ -3,6 +3,62 @@
 All notable changes to Claude Backstage are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.2] — 2026-04-23
+
+### Fixed — Smoother NPC movement (핵심 UX 개선)
+
+NPC 캐릭터가 이동 중 **짧게 워프하며 멈칫하는 현상** 을 근본 수정.
+원인은 세 가지 겹침:
+
+1. **이중 충돌 처리**: Matter.js 자체 원형 body 충돌(restitution 0.6)
+   위에 `CharacterManager._checkCollisions` 가 매 프레임 **직접 위치
+   ±3px 조작 + `setPosition` + `setVelocity(0,0)` + 400ms stun +
+   `path = null`** 을 또 돌림. 두 NPC 가 20px 이내면 이 사이클이
+   1초에 여러 번 반복 → 워프. 커스텀 함수 호출을 제거하고 Matter.js
+   에 위임.
+2. **Waypoint 마다 snap**: A\* 경로의 각 타일(48px) 도달 시 캐릭터를
+   `snap + velocity=0 + pathIndex++` 로 처리. 1초에 한 번꼴로 "정지→
+   재가속" 이 눈에 띄게 보임. 중간 waypoint 에선 snap 없이
+   `while` 루프로 조용히 advance, 최종 waypoint 에서만 snap.
+3. **30fps update vs 60/120fps render 미스매치**: 엔진 고정 update
+   를 30fps → 60fps 로 상향. dt 비례 공식이라 거동 변화 없고 샘플
+   수만 2배.
+
+### Changed — 벽/캐릭터 회피 개선
+
+- **Stuck detection 6배 민감**: 3초/5px → 1초/10px 기준. 벽이나
+  다른 NPC 에 막혀 1초간 제자리면 즉시 새 target 계산.
+- **Stuck 해제 방향 지능화**: 이전엔 인접 8 타일 중 랜덤 → 종종 또
+  벽 쪽으로 튐. 이제 **원래 타겟에 더 가까워지는 방향 우선 정렬**
+  후 walkable 선택. "우회하되 전진" 패턴.
+- **벽 충돌 시 즉시 path 리셋**: Matter.js `onWallHit` 이벤트 훅을
+  확장해서 해당 NPC 의 `path = null` → 다음 프레임 A\* 재탐색.
+  600ms 쿨다운으로 중복 처리 방지. Stuck 감지의 1초 지연을 보완.
+
+### Chore — Dead weight 제거 (2,654 lines 삭제)
+
+3번의 cleanup 커밋으로 정리된 미참조 파일:
+
+- `viewer/sprites/` (13MB, 96 PNG + aseprite) — sprite-generator.js
+  가 PICO-8 팔레트로 런타임 생성하는 구조로 바뀐 이후 방치된 asset.
+- `viewer/index-v1.html` (45KB) — 모듈 분리 이전의 모놀리식 뷰어.
+- `viewer/data/dialogues.json` (9.7KB) — AI dialogue-generator 도입
+  전 정적 대사 데이터.
+- `viewer/launch.sh` / `viewer/stop.sh` — /backstage:server 스킬이
+  직접 `bun` / `kill` 실행하는 구조로 바뀐 뒤 잔해.
+- `hooks/tool-counter-hook.sh` — hooks.json 미등록 실험.
+- `hooks/statusline-wrapper.ts` — 참조 없음.
+- `BACKSTAGE-PROTOCOL.md` — v0.4.0 이후 `DEPRECATED` 주석뿐.
+  `skills/server/SKILL.md` 의 관련 주입/제거 블록도 함께 제거.
+- `data/.gitkeep`, `docs/PATCH-PLAN-v0.5.8.md`,
+  `docs/capture.mjs`, `viewer/server.ts.bak`, `.omc/`,
+  `viewer/.omc/`, 각종 `.DS_Store`.
+
+viewer/ 디렉터리 13MB → 524KB. `docs/screenshots/` 는 README 에서
+참조되므로 유지.
+
+---
+
 ## [0.6.1] — 2026-04-22
 
 ### Fixed

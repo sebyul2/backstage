@@ -45,10 +45,10 @@ const COLLISION_DIST = 20;  // px - distance threshold for collision
 const BOUNCE_FORCE = 3;     // px - pushback distance
 const COLLISION_STUN = 400; // ms - stun duration after collision
 
-// Stuck detection constants
-const STUCK_CHECK_INTERVAL = 1000; // ms - position history sample interval
-const STUCK_WINDOW = 3;            // number of samples to look back
-const STUCK_THRESHOLD = 5;         // px - minimum movement over STUCK_WINDOW samples
+// Stuck detection constants — 벽/캐릭터에 막혀 제자리 푸시하는 현상을 빠르게 감지
+const STUCK_CHECK_INTERVAL = 500;  // ms - 0.5초 간격 샘플 (이전 1000ms)
+const STUCK_WINDOW = 2;            // 2 samples = 1초 전체 (이전 3 samples = 3초)
+const STUCK_THRESHOLD = 10;        // px - velocity 만큼 이동 했어야 함 (이전 5px)
 // Tool categories for visual display
 export const TOOL_ICONS = {
   'Read':  { icon: '📖', label: 'READ',  color: '#29ADFF' },
@@ -498,18 +498,24 @@ export class Character {
         const moved = Math.sqrt(dx * dx + dy * dy);
 
         if (moved < STUCK_THRESHOLD) {
-          // Find a random adjacent walkable tile to break the deadlock
+          // Stuck — 인접 walkable 타일 중 **원래 타겟에서 멀어지지 않는** 쪽 우선 선택.
+          // 순수 랜덤이면 자주 "벽 반대쪽" 이 아니라 또 벽 쪽으로 튐 → 개선.
           const { x: tx, y: ty } = pixelToTile(this.x, this.y);
+          const origTargetTile = pixelToTile(this.targetX, this.targetY);
           const offsets = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
-          // Shuffle offsets for randomness
-          for (let i = offsets.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [offsets[i], offsets[j]] = [offsets[j], offsets[i]];
-          }
-          for (const [ox, oy] of offsets) {
+
+          // 각 offset 을 원래 타겟과의 거리 감소량 기준으로 정렬 — 우회하되 전진하는 방향 우선.
+          const scored = offsets.map(([ox, oy]) => {
             const nx = tx + ox;
             const ny = ty + oy;
-            // findPath returns a path if tile is walkable
+            const distToOrig = Math.hypot(nx - origTargetTile.x, ny - origTargetTile.y);
+            return { ox, oy, distToOrig, rand: Math.random() };
+          });
+          scored.sort((a, b) => a.distToOrig - b.distToOrig || a.rand - b.rand);
+
+          for (const { ox, oy } of scored) {
+            const nx = tx + ox;
+            const ny = ty + oy;
             const testPath = findPath(tx, ty, nx, ny);
             if (testPath && testPath.length > 0) {
               const pixel = tileToPixel(nx, ny);
@@ -551,35 +557,45 @@ export class Character {
       return;
     }
 
-    const waypoint = this.path[this.pathIndex];
-    const dx = waypoint.x - this.x;
-    const dy = waypoint.y - this.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+    let waypoint = this.path[this.pathIndex];
+    let dx = waypoint.x - this.x;
+    let dy = waypoint.y - this.y;
+    let dist = Math.sqrt(dx * dx + dy * dy);
 
     // Arrival threshold scales with speed to prevent overshoot at high velocities
     const baseV = speed / 60;
     const arriveThreshold = Math.max(baseV * 2, 8);
 
+    // 중간 waypoint 는 snap + velocity=0 없이 다음 waypoint 로 연속 이동.
+    // 기존: waypoint 마다 정지→재시작 → 뚝뚝 끊기는 체감의 주 원인.
+    // 변경: 마지막 waypoint 에서만 snap (정확한 도착), 중간은 그냥 advance.
+    while (dist < arriveThreshold && this.pathIndex < this.path.length - 1) {
+      this.pathIndex++;
+      waypoint = this.path[this.pathIndex];
+      dx = waypoint.x - this.x;
+      dy = waypoint.y - this.y;
+      dist = Math.sqrt(dx * dx + dy * dy);
+    }
+
     if (dist < arriveThreshold) {
-      // Snap to waypoint, zero velocity, advance
+      // 최종 waypoint 도착 — 여기서만 snap.
       this.x = waypoint.x;
       this.y = waypoint.y;
       if (this.physics && this.physics.enabled) {
         this.physics.setPosition(this.name, waypoint.x, waypoint.y);
         this.physics.setVelocity(this.name, 0, 0);
       }
-      this.pathIndex++;
-      if (this.pathIndex >= this.path.length) {
-        this.path = null;
-        this.pathIndex = 0;
-        this._onArrival();
-      }
+      this.path = null;
+      this.pathIndex = 0;
+      this._onArrival();
       return;
     }
 
-    // Physics velocity toward waypoint, clamped to prevent overshoot
+    // Physics velocity toward waypoint, clamped to prevent overshoot at the *final* waypoint only.
+    // 중간 waypoint 에선 감속 없이 꾸준한 baseV 유지 → cornering smooth.
     this.dir = this._directionTo(waypoint.x, waypoint.y);
-    const v = Math.min(baseV, dist * 0.4);
+    const isLastWaypoint = this.pathIndex >= this.path.length - 1;
+    const v = isLastWaypoint ? Math.min(baseV, dist * 0.4) : baseV;
     if (this.physics && this.physics.enabled) {
       this.physics.setVelocity(this.name, (dx / dist) * v, (dy / dist) * v);
     } else {
@@ -765,32 +781,30 @@ export class CharacterManager {
     for (const char of this.characters.values()) {
       char.update(dt);
     }
-    this._checkCollisions();
+    // 커스텀 충돌 처리는 비활성화 — Matter.js body 가 이미 원형 충돌 + restitution 으로
+    // 자연스럽게 튕김. 예전의 직접 위치 조작(±3px snap) + stun + path reset 이
+    // 시각적으로 "짧게 워프하며 멈칫" 현상을 유발했음. Matter.js 에 위임하는 것이
+    // setVelocity 를 매 프레임 덮어쓰는 구조와 더 잘 맞음.
+    // this._checkCollisions();
   }
 
   _checkCollisions() {
-    // Walking states that can collide
+    // Legacy — 호출되지 않지만 whip/stun 등 다른 경로가 참조할 수 있어 보존.
     const walkingStates = new Set([S.WALKING_BREAK, S.WALKING_TO, S.WALKING_TO_BREAK]);
 
-    // Collect eligible characters into an array for pair iteration
     const eligible = [];
     for (const char of this.characters.values()) {
-      // Skip Player (boss role), Chris (boss), and C-Team (seated)
       if (char.role === 'boss' || char._isCTeam) continue;
-      // Skip stunned characters
       if (char.stunTimer > 0) continue;
-      // Skip non-walking states
       if (!walkingStates.has(char.state)) continue;
       eligible.push(char);
     }
 
-    // Check each pair once (i < j)
     for (let i = 0; i < eligible.length; i++) {
       for (let j = i + 1; j < eligible.length; j++) {
         const a = eligible[i];
         const b = eligible[j];
 
-        // Skip if either became stunned from a previous iteration in this frame
         if (a.stunTimer > 0 || b.stunTimer > 0) continue;
 
         const dx = b.x - a.x;
